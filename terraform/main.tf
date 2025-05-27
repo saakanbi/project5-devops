@@ -92,9 +92,9 @@ module "flask_app" {
 }
 
 # ----------------------------
-# EC2 - Jenkins + Sonar + Nexus (Public Subnet)
+# EC2 - Jenkins (Public Subnet)
 # ----------------------------
-module "jenkins_stack" {
+module "jenkins" {
   source              = "./modules/ec2"
   ami_id              = var.ami_id
   instance_type       = var.instance_type
@@ -103,7 +103,39 @@ module "jenkins_stack" {
   security_group_ids  = [aws_security_group.allow_ssh_http.id]
   user_data           = file("./scripts/jenkins_user_data.sh")
   tags = {
-    Name = "jenkins-stack"
+    Name = "jenkins"
+  }
+}
+
+# ----------------------------
+# EC2 - SonarQube (Public Subnet)
+# ----------------------------
+module "sonarqube" {
+  source              = "./modules/ec2"
+  ami_id              = var.ami_id
+  instance_type       = var.instance_type
+  subnet_id           = module.vpc.public_subnet_ids[1]
+  key_name            = var.key_name
+  security_group_ids  = [aws_security_group.allow_ssh_http.id]
+  user_data           = file("./scripts/sonarqube_user_data.sh")
+  tags = {
+    Name = "sonarqube"
+  }
+}
+
+# ----------------------------
+# EC2 - Nexus (Public Subnet)
+# ----------------------------
+module "nexus" {
+  source              = "./modules/ec2"
+  ami_id              = var.ami_id
+  instance_type       = var.instance_type
+  subnet_id           = module.vpc.public_subnet_ids[1]
+  key_name            = var.key_name
+  security_group_ids  = [aws_security_group.allow_ssh_http.id]
+  user_data           = file("./scripts/nexus_user_data.sh")
+  tags = {
+    Name = "nexus"
   }
 }
 

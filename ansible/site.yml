@@ -1,30 +1,34 @@
 - name: Configure Flask App Server
   hosts: flask
   become: true
+  gather_facts: no
   roles:
     - flask_app
 
-- name: Configure Jenkins + Tools Stack
+- name: Configure Jenkins Server
   hosts: jenkins
   become: true
   gather_facts: no
-  vars:
-    ansible_connection_timeout: 30
-    ansible_ssh_timeout: 30
-  pre_tasks:
-    - name: Gather minimal facts
-      setup:
-        gather_subset: 
-          - '!all'
-          - '!any'
-          - 'min'
-      ignore_errors: true
   roles:
-    - jenkins_stack      # Installs Java 17, Docker, Jenkins
-    - sonar_nexus_stack  # Uses Docker to run SonarQube + Nexus
+    - jenkins
+
+- name: Configure SonarQube Server
+  hosts: sonarqube
+  become: true
+  gather_facts: no
+  roles:
+    - sonarqube
+
+- name: Configure Nexus Server
+  hosts: nexus
+  become: true
+  gather_facts: no
+  roles:
+    - nexus
 
 - name: Configure Monitoring Stack
   hosts: monitoring
   become: true
+  gather_facts: no
   roles:
-    - monitoring_stack   # Uses Docker to run Prometheus + Grafana
+    - monitoring_stack

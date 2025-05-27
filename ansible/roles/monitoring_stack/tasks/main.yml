@@ -1,18 +1,63 @@
-- name: Copy Prometheus config
-  copy:
-    src: ../../prometheus/prometheus.yml
-    dest: /opt/prometheus/prometheus.yml
-    owner: ec2-user
-    group: ec2-user
-    mode: '0644'
+- name: Check if Amazon Linux
+  raw: cat /etc/os-release | grep -q "Amazon Linux"
+  register: is_amazon_linux
+  changed_when: false
+  ignore_errors: true
 
-- name: Run Prometheus with custom config
-  docker_container:
-    name: prometheus
-    image: prom/prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - /opt/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-    restart_policy: always
-    state: started
+- name: Install Docker on Amazon Linux
+  raw: amazon-linux-extras install -y docker
+  when: is_amazon_linux is succeeded and is_amazon_linux.rc == 0
+  ignore_errors: true
+
+- name: Install Docker on other systems
+  raw: yum install -y docker || apt-get update && apt-get install -y docker.io
+  when: is_amazon_linux is failed or is_amazon_linux.rc != 0
+  ignore_errors: true
+
+- name: Start and enable Docker
+  raw: systemctl start docker && systemctl enable docker
+  ignore_errors: true
+
+- name: Create directories for Prometheus and Grafana
+  raw: mkdir -p /opt/prometheus/config /opt/grafana/data
+  ignore_errors: true
+
+- name: Create Prometheus config
+  raw: |
+    cat > /opt/prometheus/config/prometheus.yml << 'EOF'
+    global:
+      scrape_interval: 15s
+
+    scrape_configs:
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:9090']
+
+      - job_name: 'flask_dashboard'
+        metrics_path: /metrics
+        static_configs:
+          - targets: ['flask-app-alb-416560770.us-east-1.elb.amazonaws.com:80']
+    EOF
+  ignore_errors: true
+
+- name: Check if Prometheus container exists
+  raw: docker ps -a | grep -q prometheus
+  register: prometheus_exists
+  changed_when: false
+  ignore_errors: true
+
+- name: Run Prometheus container if not exists
+  raw: docker run -d --name prometheus -p 9090:9090 -v /opt/prometheus/config:/etc/prometheus prom/prometheus
+  when: prometheus_exists.rc != 0
+  ignore_errors: true
+
+- name: Check if Grafana container exists
+  raw: docker ps -a | grep -q grafana
+  register: grafana_exists
+  changed_when: false
+  ignore_errors: true
+
+- name: Run Grafana container if not exists
+  raw: docker run -d --name grafana -p 3000:3000 -v /opt/grafana/data:/var/lib/grafana grafana/grafana
+  when: grafana_exists.rc != 0
+  ignore_errors: true

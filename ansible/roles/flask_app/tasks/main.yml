@@ -13,101 +13,93 @@
   when: is_amazon_linux is failed or is_amazon_linux.rc != 0
 
 - name: Ensure Nginx is started and enabled
-  systemd:
-    name: nginx
-    enabled: yes
-    state: started
+  raw: systemctl enable nginx && systemctl start nginx
+  ignore_errors: true
 
 - name: Install Python packages
-  pip:
-    name:
-      - flask
-      - gunicorn
-      - prometheus_client
-    executable: pip3
+  raw: pip3 install flask gunicorn prometheus_client
+  ignore_errors: true
 
 - name: Create Flask app directory
-  file:
-    path: /opt/flask_dashboard
-    state: directory
-    owner: ec2-user
-    group: ec2-user
-    mode: '0755'
+  raw: mkdir -p /opt/flask_dashboard && chown -R ec2-user:ec2-user /opt/flask_dashboard && chmod 755 /opt/flask_dashboard
+  ignore_errors: true
 
 - name: Create simple Flask app file
-  copy:
-    dest: /opt/flask_dashboard/app.py
-    content: |
-      from flask import Flask, render_template
-      from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
+  raw: |
+    cat > /opt/flask_dashboard/app.py << 'EOF'
+    from flask import Flask, render_template
+    from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
 
-      app = Flask(__name__)
-      
-      # Create a metric to track requests
-      REQUEST_COUNT = Counter('app_requests_total', 'Total app requests')
-      
-      @app.route('/')
-      def home():
-          REQUEST_COUNT.inc()
-          return "Flask Dashboard is running!"
-      
-      @app.route('/metrics')
-      def metrics():
-          return generate_latest(), 200, {'Content-Type': CONTENT_TYPE_LATEST}
-      
-      if __name__ == '__main__':
-          app.run(host='0.0.0.0', port=8000)
-    owner: ec2-user
-    group: ec2-user
-    mode: '0644'
+    app = Flask(__name__)
+    
+    # Create a metric to track requests
+    REQUEST_COUNT = Counter('app_requests_total', 'Total app requests')
+    
+    @app.route('/')
+    def home():
+        REQUEST_COUNT.inc()
+        return "Flask Dashboard is running!"
+    
+    @app.route('/metrics')
+    def metrics():
+        return generate_latest(), 200, {'Content-Type': CONTENT_TYPE_LATEST}
+    
+    if __name__ == '__main__':
+        app.run(host='0.0.0.0', port=8000)
+    EOF
+    chown ec2-user:ec2-user /opt/flask_dashboard/app.py
+    chmod 644 /opt/flask_dashboard/app.py
+  ignore_errors: true
 
 - name: Create requirements.txt
-  copy:
-    dest: /opt/flask_dashboard/requirements.txt
-    content: |
-      flask
-      gunicorn
-      prometheus_client
-    owner: ec2-user
-    group: ec2-user
-    mode: '0644'
+  raw: |
+    cat > /opt/flask_dashboard/requirements.txt << 'EOF'
+    flask
+    gunicorn
+    prometheus_client
+    EOF
+    chown ec2-user:ec2-user /opt/flask_dashboard/requirements.txt
+    chmod 644 /opt/flask_dashboard/requirements.txt
+  ignore_errors: true
 
 - name: Create systemd service for Gunicorn
-  copy:
-    dest: /etc/systemd/system/flaskapp.service
-    content: |
-      [Unit]
-      Description=Gunicorn Flask Dashboard
-      After=network.target
+  raw: |
+    cat > /etc/systemd/system/flaskapp.service << 'EOF'
+    [Unit]
+    Description=Gunicorn Flask Dashboard
+    After=network.target
 
-      [Service]
-      User=ec2-user
-      WorkingDirectory=/opt/flask_dashboard
-      ExecStart=/usr/local/bin/gunicorn --workers 3 --bind 0.0.0.0:8000 app:app
-      Restart=always
+    [Service]
+    User=ec2-user
+    WorkingDirectory=/opt/flask_dashboard
+    ExecStart=/usr/local/bin/gunicorn --workers 3 --bind 0.0.0.0:8000 app:app
+    Restart=always
 
-      [Install]
-      WantedBy=multi-user.target
+    [Install]
+    WantedBy=multi-user.target
+    EOF
+  ignore_errors: true
 
 - name: Reload systemd and start flaskapp
-  systemd:
-    name: flaskapp
-    enabled: yes
-    daemon_reload: yes
-    state: started
+  raw: systemctl daemon-reload && systemctl enable flaskapp && systemctl start flaskapp
+  ignore_errors: true
 
-- name: Configure Nginx (optional — if you want proxying)
-  copy:
-    dest: /etc/nginx/conf.d/flaskapp.conf
-    content: |
-      server {
-        listen 80;
-        server_name _;
+- name: Configure Nginx
+  raw: |
+    cat > /etc/nginx/conf.d/flaskapp.conf << 'EOF'
+    server {
+      listen 80;
+      server_name _;
 
-        location / {
-          proxy_pass http://127.0.0.1:8000;
-          proxy_set_header Host $host;
-          proxy_set_header X-Real-IP $remote_addr;
-        }
+      location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
       }
-  notify: Restart nginx
+    }
+    EOF
+  ignore_errors: true
+
+- name: Restart Nginx
+  raw: systemctl restart nginx
+  ignore_errors: true
