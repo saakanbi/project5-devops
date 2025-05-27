@@ -1,0 +1,60 @@
+- name: Verify Jenkins + SonarQube + Nexus stack
+  hosts: jenkins
+  become: true
+  vars:
+    ansible_connection_timeout: 60
+    ansible_ssh_retries: 10
+  pre_tasks:
+    - name: Wait for SSH to become available
+      wait_for:
+        host: "{{ inventory_hostname }}"
+        port: 22
+        delay: 10
+        timeout: 300
+      delegate_to: localhost
+      become: false
+  tasks:
+
+    - name: Wait for Docker to be ready
+      shell: docker info
+      register: docker_ready
+      retries: 5
+      delay: 5
+      until: docker_ready.rc == 0
+
+    - name: Check running containers
+      shell: docker ps --format '{{.Names}}'
+      register: docker_containers
+
+    - name: Fail if Jenkins container is not running
+      fail:
+        msg: "Jenkins container is NOT running"
+      when: "'jenkins' not in docker_containers.stdout_lines"
+
+    - name: Fail if SonarQube container is not running
+      fail:
+        msg: "SonarQube container is NOT running"
+      when: "'sonarqube' not in docker_containers.stdout_lines"
+
+    - name: Fail if Nexus container is not running
+      fail:
+        msg: "Nexus container is NOT running"
+      when: "'nexus' not in docker_containers.stdout_lines"
+
+    - name: Check Jenkins HTTP status
+      uri:
+        url: http://localhost:8080
+        status_code: 200
+        return_content: no
+
+    - name: Check SonarQube HTTP status
+      uri:
+        url: http://localhost:9000
+        status_code: 200
+        return_content: no
+
+    - name: Check Nexus HTTP status
+      uri:
+        url: http://localhost:8081
+        status_code: 200
+        return_content: no

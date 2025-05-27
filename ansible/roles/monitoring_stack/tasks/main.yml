@@ -1,0 +1,18 @@
+- name: Copy Prometheus config
+  copy:
+    src: ../../prometheus/prometheus.yml
+    dest: /opt/prometheus/prometheus.yml
+    owner: ec2-user
+    group: ec2-user
+    mode: '0644'
+
+- name: Run Prometheus with custom config
+  docker_container:
+    name: prometheus
+    image: prom/prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - /opt/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    restart_policy: always
+    state: started

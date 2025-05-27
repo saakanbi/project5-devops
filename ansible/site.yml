@@ -1,0 +1,18 @@
+- name: Configure Flask App Server
+  hosts: flask
+  become: true
+  roles:
+    - flask_app
+
+- name: Configure Jenkins + Tools Stack
+  hosts: jenkins
+  become: true
+  roles:
+    - jenkins_stack      # Installs Java 17, Docker, Jenkins
+    - sonar_nexus_stack  # Uses Docker to run SonarQube + Nexus
+
+- name: Configure Monitoring Stack
+  hosts: monitoring
+  become: true
+  roles:
+    - monitoring_stack   # Uses Docker to run Prometheus + Grafana

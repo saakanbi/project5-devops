@@ -1,0 +1,17 @@
+- name: Run SonarQube container
+  docker_container:
+    name: sonarqube
+    image: sonarqube
+    ports:
+      - "9000:9000"
+    restart_policy: always
+    state: started
+
+- name: Run Nexus3 container
+  docker_container:
+    name: nexus
+    image: sonatype/nexus3
+    ports:
+      - "8081:8081"
+    restart_policy: always
+    state: started

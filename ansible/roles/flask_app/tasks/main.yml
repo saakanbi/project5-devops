@@ -1,0 +1,113 @@
+- name: Check if Amazon Linux
+  raw: cat /etc/os-release | grep -q "Amazon Linux"
+  register: is_amazon_linux
+  changed_when: false
+  ignore_errors: true
+
+- name: Install Python, pip, and Nginx on Amazon Linux
+  raw: amazon-linux-extras install -y nginx1 && yum install -y python3 python3-pip
+  when: is_amazon_linux is succeeded and is_amazon_linux.rc == 0
+
+- name: Install Python, pip, and Nginx on other systems
+  raw: yum install -y python3 python3-pip nginx || apt-get update && apt-get install -y python3 python3-pip nginx
+  when: is_amazon_linux is failed or is_amazon_linux.rc != 0
+
+- name: Ensure Nginx is started and enabled
+  systemd:
+    name: nginx
+    enabled: yes
+    state: started
+
+- name: Install Python packages
+  pip:
+    name:
+      - flask
+      - gunicorn
+      - prometheus_client
+    executable: pip3
+
+- name: Create Flask app directory
+  file:
+    path: /opt/flask_dashboard
+    state: directory
+    owner: ec2-user
+    group: ec2-user
+    mode: '0755'
+
+- name: Create simple Flask app file
+  copy:
+    dest: /opt/flask_dashboard/app.py
+    content: |
+      from flask import Flask, render_template
+      from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
+
+      app = Flask(__name__)
+      
+      # Create a metric to track requests
+      REQUEST_COUNT = Counter('app_requests_total', 'Total app requests')
+      
+      @app.route('/')
+      def home():
+          REQUEST_COUNT.inc()
+          return "Flask Dashboard is running!"
+      
+      @app.route('/metrics')
+      def metrics():
+          return generate_latest(), 200, {'Content-Type': CONTENT_TYPE_LATEST}
+      
+      if __name__ == '__main__':
+          app.run(host='0.0.0.0', port=8000)
+    owner: ec2-user
+    group: ec2-user
+    mode: '0644'
+
+- name: Create requirements.txt
+  copy:
+    dest: /opt/flask_dashboard/requirements.txt
+    content: |
+      flask
+      gunicorn
+      prometheus_client
+    owner: ec2-user
+    group: ec2-user
+    mode: '0644'
+
+- name: Create systemd service for Gunicorn
+  copy:
+    dest: /etc/systemd/system/flaskapp.service
+    content: |
+      [Unit]
+      Description=Gunicorn Flask Dashboard
+      After=network.target
+
+      [Service]
+      User=ec2-user
+      WorkingDirectory=/opt/flask_dashboard
+      ExecStart=/usr/local/bin/gunicorn --workers 3 --bind 0.0.0.0:8000 app:app
+      Restart=always
+
+      [Install]
+      WantedBy=multi-user.target
+
+- name: Reload systemd and start flaskapp
+  systemd:
+    name: flaskapp
+    enabled: yes
+    daemon_reload: yes
+    state: started
+
+- name: Configure Nginx (optional — if you want proxying)
+  copy:
+    dest: /etc/nginx/conf.d/flaskapp.conf
+    content: |
+      server {
+        listen 80;
+        server_name _;
+
+        location / {
+          proxy_pass http://127.0.0.1:8000;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+        }
+      }
+  notify: Restart nginx

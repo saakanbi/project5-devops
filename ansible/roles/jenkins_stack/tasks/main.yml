@@ -1,0 +1,41 @@
+- name: Install Amazon Corretto Java 17
+  yum:
+    name: java-17-amazon-corretto
+    state: present
+
+- name: Install Docker
+  yum:
+    name: docker
+    state: present
+
+- name: Add Jenkins repo
+  get_url:
+    url: https://pkg.jenkins.io/redhat-stable/jenkins.repo
+    dest: /etc/yum.repos.d/jenkins.repo
+
+- name: Import Jenkins GPG key
+  rpm_key:
+    key: https://pkg.jenkins.io/redhat-stable/jenkins.io.key
+
+- name: Install Jenkins
+  yum:
+    name: jenkins
+    state: present
+
+- name: Start and enable Docker
+  systemd:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Add ec2-user to docker group
+  user:
+    name: ec2-user
+    groups: docker
+    append: yes
+
+- name: Start and enable Jenkins
+  systemd:
+    name: jenkins
+    enabled: true
+    state: started
