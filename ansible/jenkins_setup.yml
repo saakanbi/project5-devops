@@ -1,0 +1,42 @@
+---
+- name: Setup Jenkins Stack with Raw Commands
+  hosts: jenkins
+  gather_facts: no
+  become: no
+  tasks:
+    - name: Wait for SSH connection
+      raw: echo "Connected"
+      register: connection_test
+      retries: 10
+      delay: 5
+      until: connection_test is success
+
+    - name: Check if Docker is installed
+      raw: command -v docker
+      register: docker_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: Check if Docker is running
+      raw: systemctl status docker
+      register: docker_status
+      ignore_errors: true
+      changed_when: false
+
+    - name: Check Docker images
+      raw: docker images
+      register: docker_images
+      ignore_errors: true
+      changed_when: false
+
+    - name: Run Jenkins container
+      raw: docker ps | grep -q jenkins || docker run -d --name jenkins -p 8080:8080 -p 50000:50000 jenkins/jenkins:lts
+      ignore_errors: true
+
+    - name: Run SonarQube container
+      raw: docker ps | grep -q sonarqube || docker run -d --name sonarqube -p 9000:9000 sonarqube
+      ignore_errors: true
+
+    - name: Run Nexus container
+      raw: docker ps | grep -q nexus || docker run -d --name nexus -p 8081:8081 sonatype/nexus3
+      ignore_errors: true

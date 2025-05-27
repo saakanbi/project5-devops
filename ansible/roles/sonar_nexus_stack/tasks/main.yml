@@ -1,17 +1,15 @@
+- name: Install Python dependencies with compatible urllib3
+  raw: pip3.8 install 'urllib3<2.0' requests docker
+  changed_when: false
+
 - name: Run SonarQube container
-  docker_container:
-    name: sonarqube
-    image: sonarqube
-    ports:
-      - "9000:9000"
-    restart_policy: always
-    state: started
+  shell: docker run -d --name sonarqube -p 9000:9000 --restart always sonarqube
+  args:
+    creates: /var/lib/docker/containers/*sonarqube*
+  ignore_errors: true
 
 - name: Run Nexus3 container
-  docker_container:
-    name: nexus
-    image: sonatype/nexus3
-    ports:
-      - "8081:8081"
-    restart_policy: always
-    state: started
+  shell: docker run -d --name nexus -p 8081:8081 --restart always sonatype/nexus3
+  args:
+    creates: /var/lib/docker/containers/*nexus*
+  ignore_errors: true

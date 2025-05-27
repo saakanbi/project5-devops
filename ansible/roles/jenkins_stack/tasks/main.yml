@@ -1,32 +1,22 @@
-- name: Install Amazon Corretto Java 17
-  yum:
-    name: java-17-amazon-corretto
-    state: present
+- name: Check if Amazon Linux
+  raw: cat /etc/os-release | grep -q "Amazon Linux"
+  register: is_amazon_linux
+  changed_when: false
+  ignore_errors: true
 
-- name: Install Docker
-  yum:
-    name: docker
-    state: present
+- name: Install Docker and Git on Amazon Linux
+  raw: amazon-linux-extras install -y docker && yum install -y git
+  when: is_amazon_linux is succeeded and is_amazon_linux.rc == 0
 
-- name: Add Jenkins repo
-  get_url:
-    url: https://pkg.jenkins.io/redhat-stable/jenkins.repo
-    dest: /etc/yum.repos.d/jenkins.repo
-
-- name: Import Jenkins GPG key
-  rpm_key:
-    key: https://pkg.jenkins.io/redhat-stable/jenkins.io.key
-
-- name: Install Jenkins
-  yum:
-    name: jenkins
-    state: present
+- name: Install Docker and Git on other systems
+  raw: yum install -y docker git || apt-get update && apt-get install -y docker.io git
+  when: is_amazon_linux is failed or is_amazon_linux.rc != 0
 
 - name: Start and enable Docker
   systemd:
     name: docker
-    enabled: true
     state: started
+    enabled: true
 
 - name: Add ec2-user to docker group
   user:
@@ -34,8 +24,24 @@
     groups: docker
     append: yes
 
-- name: Start and enable Jenkins
-  systemd:
-    name: jenkins
-    enabled: true
-    state: started
+- name: Install Python dependencies for Docker module
+  raw: pip3.8 install docker requests
+  changed_when: false
+
+- name: Run Jenkins container
+  shell: docker run -d --name jenkins -p 8080:8080 -p 50000:50000 jenkins/jenkins:lts
+  args:
+    creates: /var/lib/docker/containers/*jenkins*
+  ignore_errors: true
+
+- name: Run SonarQube container
+  shell: docker run -d --name sonarqube -p 9000:9000 sonarqube
+  args:
+    creates: /var/lib/docker/containers/*sonarqube*
+  ignore_errors: true
+
+- name: Run Nexus3 container
+  shell: docker run -d --name nexus -p 8081:8081 sonatype/nexus3
+  args:
+    creates: /var/lib/docker/containers/*nexus*
+  ignore_errors: true

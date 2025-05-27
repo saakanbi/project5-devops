@@ -7,6 +7,18 @@
 - name: Configure Jenkins + Tools Stack
   hosts: jenkins
   become: true
+  gather_facts: no
+  vars:
+    ansible_connection_timeout: 30
+    ansible_ssh_timeout: 30
+  pre_tasks:
+    - name: Gather minimal facts
+      setup:
+        gather_subset: 
+          - '!all'
+          - '!any'
+          - 'min'
+      ignore_errors: true
   roles:
     - jenkins_stack      # Installs Java 17, Docker, Jenkins
     - sonar_nexus_stack  # Uses Docker to run SonarQube + Nexus
