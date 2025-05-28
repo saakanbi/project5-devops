@@ -1,0 +1,67 @@
+pipeline {
+    agent any
+    
+    environment {
+        DOCKER_REGISTRY = "your-registry-url" // Replace with your Docker registry
+        IMAGE_NAME = "flask-app"
+        IMAGE_TAG = "${env.BUILD_NUMBER}"
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('SonarQube') {
+                    sh 'cd app && pip install -r requirements.txt'
+                    sh 'cd app && pip install pytest pytest-cov'
+                    sh 'cd app && pytest --cov=. --cov-report=xml:../coverage.xml'
+                    sh 'sonar-scanner'
+                }
+            }
+        }
+        
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 1, unit: 'HOURS') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                dir('app') {
+                    sh "docker build -t ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} ."
+                }
+            }
+        }
+        
+        stage('Push Docker Image') {
+            steps {
+                withCredentials([string(credentialsId: 'docker-registry-credentials', variable: 'DOCKER_CREDS')]) {
+                    sh "echo ${DOCKER_CREDS} | docker login ${DOCKER_REGISTRY} -u username --password-stdin"
+                    sh "docker push ${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+                }
+            }
+        }
+        
+        stage('Deploy') {
+            steps {
+                echo 'Deploying application...'
+                // Add deployment steps here
+            }
+        }
+    }
+    
+    post {
+        always {
+            sh 'docker logout ${DOCKER_REGISTRY}'
+            cleanWs()
+        }
+    }
+}

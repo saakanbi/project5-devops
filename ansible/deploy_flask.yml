@@ -1,0 +1,172 @@
+
+---
+- name: Deploy and Test Flask Application
+  hosts: flask
+  become: true
+  gather_facts: no
+  tasks:
+    - name: Create Flask application directory
+      raw: |
+        mkdir -p /opt/flask_dashboard
+        chown -R ec2-user:ec2-user /opt/flask_dashboard
+      ignore_errors: true
+
+    - name: Copy app.py to server
+      raw: |
+        cat > /opt/flask_dashboard/app.py << 'EOF'
+        from flask import Flask
+        from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
+
+        app = Flask(__name__)
+
+        # Create metrics
+        REQUEST_COUNT = Counter('app_requests_total', 'Total app requests')
+        DASHBOARD_VIEWS = Counter('app_dashboard_views', 'Dashboard page views')
+
+        @app.route('/')
+        def dashboard():
+            REQUEST_COUNT.inc()
+            DASHBOARD_VIEWS.inc()
+            return '''
+            <html>
+                <head>
+                    <title>CEEYIT Dashboard</title>
+                    <style>
+                        body { font-family: Arial; background: #fefefe; text-align: center; margin-top: 100px; }
+                        h1 { color: #2a9d8f; }
+                        p { font-size: 18px; color: #264653; }
+                    </style>
+                </head>
+                <body>
+                    <h1>CEEYIT Monitoring Dashboard</h1>
+                    <p>Your DevOps metrics will be visualized here.</p>
+                    <p><a href="/metrics">View Prometheus Metrics</a></p>
+                </body>
+            </html>
+            '''
+
+        @app.route('/metrics')
+        def metrics():
+            REQUEST_COUNT.inc()
+            return generate_latest(), 200, {'Content-Type': CONTENT_TYPE_LATEST}
+
+        @app.route('/health')
+        def health():
+            return 'OK', 200
+
+        if __name__ == '__main__':
+            app.run(host='0.0.0.0', port=8000)
+        EOF
+        chown ec2-user:ec2-user /opt/flask_dashboard/app.py
+        chmod 644 /opt/flask_dashboard/app.py
+      ignore_errors: true
+
+    - name: Copy requirements.txt to server
+      raw: |
+        cat > /opt/flask_dashboard/requirements.txt << 'EOF'
+        flask
+        gunicorn
+        prometheus_client
+        EOF
+        chown ec2-user:ec2-user /opt/flask_dashboard/requirements.txt
+        chmod 644 /opt/flask_dashboard/requirements.txt
+      ignore_errors: true
+
+    - name: Install dependencies
+      raw: pip3 install -r /opt/flask_dashboard/requirements.txt
+      ignore_errors: true
+
+    - name: Create systemd service file
+      raw: |
+        cat > /etc/systemd/system/flaskapp.service << 'EOF'
+        [Unit]
+        Description=Gunicorn Flask Dashboard
+        After=network.target
+
+        [Service]
+        User=ec2-user
+        WorkingDirectory=/opt/flask_dashboard
+        ExecStart=/usr/local/bin/gunicorn --workers 3 --bind 0.0.0.0:8000 app:app
+        Restart=always
+
+        [Install]
+        WantedBy=multi-user.target
+        EOF
+      ignore_errors: true
+
+    - name: Configure Nginx
+      raw: |
+        cat > /etc/nginx/conf.d/flaskapp.conf << 'EOF'
+        server {
+          listen 80;
+          server_name _;
+
+          location / {
+            proxy_pass http://127.0.0.1:8000;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+          }
+        }
+        EOF
+      ignore_errors: true
+
+    - name: Reload systemd
+      raw: systemctl daemon-reload
+      ignore_errors: true
+
+    - name: Restart Flask service
+      raw: systemctl restart flaskapp
+      ignore_errors: true
+
+    - name: Restart Nginx
+      raw: systemctl restart nginx
+      ignore_errors: true
+
+    - name: Wait for service to start
+      raw: sleep 5
+      ignore_errors: true
+
+    - name: Check if Flask service is running
+      raw: systemctl status flaskapp
+      register: flask_status
+      ignore_errors: true
+
+    - name: Display Flask service status
+      raw: 'echo "Flask service status: {{ flask_status.stdout }}"'
+      ignore_errors: true
+
+    - name: Check if Nginx is running
+      raw: systemctl status nginx
+      register: nginx_status
+      ignore_errors: true
+
+    - name: Display Nginx status
+      raw: 'echo "Nginx status: {{ nginx_status.stdout }}"'
+      ignore_errors: true
+
+    - name: Test local health endpoint
+      raw: curl -s http://localhost:8000/health
+      register: health_result
+      ignore_errors: true
+
+    - name: Display health check result
+      raw: 'echo "Health check result: {{ health_result.stdout }}"'
+      ignore_errors: true
+
+    - name: Test local metrics endpoint
+      raw: curl -s http://localhost:8000/metrics | head -n 10
+      register: metrics_result
+      ignore_errors: true
+
+    - name: Display metrics
+      raw: 'echo "Metrics (first 10 lines): {{ metrics_result.stdout }}"'
+      ignore_errors: true
+
+    - name: Check port 80 connectivity
+      raw: curl -s http://localhost:80
+      register: port80_result
+      ignore_errors: true
+
+    - name: Display port 80 result
+      raw: 'echo "Port 80 result: {{ port80_result.stdout }}"'
+      ignore_errors: true

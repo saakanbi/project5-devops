@@ -9,4 +9,8 @@ scrape_configs:
   - job_name: 'flask_dashboard'
     metrics_path: /metrics
     static_configs:
-      - targets: ['flask-app-alb-2130422129.us-east-1.elb.amazonaws.com:80']
+      - targets: ['44.203.53.132:80']
+
+  - job_name: 'node_exporter'
+    static_configs:
+      - targets: ['localhost:9100']
