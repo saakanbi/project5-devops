@@ -34,8 +34,6 @@ pipeline {
             }
         }
         
-
-        
         stage('Package Application') {
             steps {
                 dir('app') {
@@ -48,21 +46,17 @@ pipeline {
         
         stage('Deploy with Ansible') {
             steps {
-                ansiblePlaybook(
-                    playbook: "${WORKSPACE}/ansible/deploy_flask.yml",
-                    inventory: "${WORKSPACE}/ansible/inventory",
-                    extras: "-e app_version=${APP_VERSION}"
-                )
+                sshagent(['ansible_key']) {
+                    sh "ansible-playbook -i ${ANSIBLE_INVENTORY} ${WORKSPACE}/ansible/deploy_flask.yml -e app_version=${APP_VERSION}"
+                }
             }
         }
         
         stage('Setup Monitoring') {
             steps {
-                ansiblePlaybook(
-                    playbook: "${WORKSPACE}/ansible/site.yml",
-                    inventory: "${WORKSPACE}/ansible/inventory",
-                    tags: "monitoring"
-                )
+                sshagent(['ansible_key']) {
+                    sh "ansible-playbook -i ${ANSIBLE_INVENTORY} ${WORKSPACE}/ansible/site.yml --tags monitoring"
+                }
             }
         }
     }
