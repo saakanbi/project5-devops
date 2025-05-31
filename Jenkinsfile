@@ -55,68 +55,13 @@ pipeline {
                         # Copy files to Flask server
                         scp -o StrictHostKeyChecking=no -r "${WORKSPACE}/deploy/"* ec2-user@${FLASK_SERVER}:/tmp/flask-app/
                         
-                        # Create Nginx config file
-                        cat > nginx.conf << 'EOF'
-user nginx;
-worker_processes auto;
-error_log /var/log/nginx/error.log;
-pid /run/nginx.pid;
-
-include /usr/share/nginx/modules/*.conf;
-
-events {
-    worker_connections 1024;
-}
-
-http {
-    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
-                      '$status $body_bytes_sent "$http_referer" '
-                      '"$http_user_agent" "$http_x_forwarded_for"';
-
-    access_log  /var/log/nginx/access.log  main;
-
-    sendfile            on;
-    tcp_nopush          on;
-    tcp_nodelay         on;
-    keepalive_timeout   65;
-    types_hash_max_size 4096;
-
-    include             /etc/nginx/mime.types;
-    default_type        application/octet-stream;
-
-    server {
-        listen       80;
-        server_name  _;
-        root         /usr/share/nginx/html;
-
-        location / {
-            proxy_pass http://127.0.0.1:8000;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-        }
-
-        location /metrics {
-            proxy_pass http://127.0.0.1:8000/metrics;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-        }
-
-        error_page 404 /404.html;
-        location = /404.html {
-        }
-
-        error_page 500 502 503 504 /50x.html;
-        location = /50x.html {
-        }
-    }
-}
-EOF
-                        
-                        # Copy Nginx config to server
-                        scp -o StrictHostKeyChecking=no nginx.conf ec2-user@${FLASK_SERVER}:/tmp/nginx.conf
-                        
                         # SSH to server and deploy
                         ssh -o StrictHostKeyChecking=no ec2-user@${FLASK_SERVER} "
+                            # Stop existing services
+                            sudo systemctl stop flaskapp || true
+                            sudo systemctl stop nginx || true
+                            
+                            # Copy application files
                             sudo mkdir -p /opt/flask_dashboard
                             sudo cp -r /tmp/flask-app/* /opt/flask_dashboard/
                             cd /opt/flask_dashboard
@@ -131,15 +76,32 @@ After=network.target
 [Service]
 User=ec2-user
 WorkingDirectory=/opt/flask_dashboard
-ExecStart=/usr/local/bin/gunicorn --workers 3 --bind 127.0.0.1:8000 app:app
+ExecStart=/usr/local/bin/gunicorn --workers 3 --bind 0.0.0.0:8000 app:app
 Restart=always
 
 [Install]
 WantedBy=multi-user.target
 EOF'
                             
-                            # Configure Nginx
-                            sudo cp /tmp/nginx.conf /etc/nginx/nginx.conf
+                            # Create Nginx server block
+                            sudo bash -c 'cat > /etc/nginx/conf.d/flask-app.conf << EOF
+server {
+    listen 80;
+    server_name _;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host \\$host;
+        proxy_set_header X-Real-IP \\$remote_addr;
+    }
+
+    location /metrics {
+        proxy_pass http://127.0.0.1:8000/metrics;
+        proxy_set_header Host \\$host;
+        proxy_set_header X-Real-IP \\$remote_addr;
+    }
+}
+EOF'
                             
                             # Remove default Nginx config
                             sudo rm -f /etc/nginx/conf.d/default.conf || true
@@ -151,6 +113,7 @@ EOF'
                             sudo systemctl daemon-reload
                             sudo systemctl enable flaskapp
                             sudo systemctl restart flaskapp
+                            sleep 3
                             sudo systemctl enable nginx
                             sudo systemctl restart nginx
                             
@@ -159,6 +122,14 @@ EOF'
                             sudo systemctl status flaskapp
                             echo 'Nginx service status:'
                             sudo systemctl status nginx
+                            
+                            # Check if Gunicorn is listening
+                            echo 'Checking if Gunicorn is listening:'
+                            sudo netstat -tulpn | grep 8000
+                            
+                            # Check Nginx error log
+                            echo 'Nginx error log:'
+                            sudo tail -n 20 /var/log/nginx/error.log
                         "
                     '''
                 }
@@ -172,8 +143,8 @@ EOF'
                     sleep 5
                     
                     # Check if application is accessible
-                    curl -s http://${FLASK_SERVER}/health || echo "Health check failed"
-                    curl -s http://${FLASK_SERVER}/metrics | head -n 5 || echo "Metrics check failed"
+                    curl -v http://${FLASK_SERVER}/health || echo "Health check failed"
+                    curl -v http://${FLASK_SERVER}/metrics | head -n 5 || echo "Metrics check failed"
                 '''
             }
         }
