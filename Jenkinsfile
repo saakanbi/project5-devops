@@ -40,6 +40,9 @@ pipeline {
                     # Copy application files
                     cp -r app/* "${WORKSPACE}/deploy/"
                     
+                    # Fix prometheus_metrics.py
+                    sed -i 's/GC_COLLECTOR.register()/# GC_COLLECTOR already registered automatically/' "${WORKSPACE}/deploy/prometheus_metrics.py"
+                    
                     # Create version file
                     echo "${APP_VERSION}" > "${WORKSPACE}/deploy/VERSION"
                     
