@@ -66,9 +66,12 @@ pipeline {
                             cd /opt/flask-app
                             sudo pip3 install -r requirements.txt
                             
+                            # Check the port in app.py
+                            echo 'Checking Flask port:'
+                            grep -r 'port=' /opt/flask-app/app.py
+                            
                             # Create systemd service if it doesn't exist
-                            if [ ! -f /etc/systemd/system/flask-app.service ]; then
-                                sudo bash -c 'cat > /etc/systemd/system/flask-app.service << EOF
+                            sudo bash -c 'cat > /etc/systemd/system/flask-app.service << EOF
 [Unit]
 Description=Flask Application
 After=network.target
@@ -76,20 +79,25 @@ After=network.target
 [Service]
 User=ec2-user
 WorkingDirectory=/opt/flask-app
-ExecStart=/usr/bin/python3 app.py
+ExecStart=/usr/bin/python3 -u app.py
+Environment=PYTHONUNBUFFERED=1
 Restart=always
 
 [Install]
 WantedBy=multi-user.target
 EOF'
-                                sudo systemctl daemon-reload
-                                sudo systemctl enable flask-app
-                            fi
+                            sudo systemctl daemon-reload
+                            sudo systemctl enable flask-app
                             
+                            # Start the service and check logs
                             sudo systemctl restart flask-app
+                            sleep 5
+                            echo 'Service status:'
+                            sudo systemctl status flask-app
+                            echo 'Service logs:'
+                            sudo journalctl -u flask-app -n 20
                             
                             # Verify service is running
-                            sleep 5
                             if sudo systemctl is-active --quiet flask-app; then
                                 echo 'Flask application deployed successfully!'
                             else
@@ -124,7 +132,7 @@ global:
 scrape_configs:
   - job_name: "flask-app"
     static_configs:
-      - targets: ["localhost:5000"]
+      - targets: ["localhost:8000"]
     metrics_path: "/metrics"
 EOF'
                             
@@ -143,36 +151,4 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 EOF'
-                                sudo systemctl daemon-reload
-                                sudo systemctl enable prometheus
-                            fi
-                            
-                            sudo systemctl restart prometheus
-                            
-                            # Verify Prometheus is running
-                            sleep 5
-                            if sudo systemctl is-active --quiet prometheus; then
-                                echo 'Prometheus started successfully!'
-                            else
-                                echo 'Failed to start Prometheus!'
-                                exit 1
-                            fi
-                        "
-                    '''
-                }
-            }
-        }
-    }
-    
-    post {
-        success {
-            echo 'Pipeline completed successfully!'
-        }
-        failure {
-            echo 'Pipeline failed!'
-        }
-        always {
-            cleanWs()
-        }
-    }
-}
+                                sudo systemctl daemon
