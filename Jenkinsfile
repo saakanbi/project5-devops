@@ -34,10 +34,12 @@ pipeline {
         stage('Package Application') {
             steps {
                 dir('app') {
-                    sh "find . -name '*.pyc' -delete || true"
-                    sh "tar --exclude='*.git*' --exclude='*.pyc' -czf flask-app-${APP_VERSION}.tar.gz ."
-                    sh "mkdir -p ${WORKSPACE}/ansible/files"
-                    sh "cp flask-app-${APP_VERSION}.tar.gz ${WORKSPACE}/ansible/files/"
+                    sh '''
+                        find . -name "*.pyc" -delete || true
+                        tar --exclude="*.git*" --exclude="*.pyc" -czf flask-app-${APP_VERSION}.tar.gz .
+                        mkdir -p "${WORKSPACE}/ansible/files"
+                        cp "flask-app-${APP_VERSION}.tar.gz" "${WORKSPACE}/ansible/files/"
+                    '''
                 }
             }
         }
