@@ -17,9 +17,9 @@ pipeline {
         stage('Package Application') {
             steps {
                 dir('app') {
-                    sh "zip -r flask-app-${APP_VERSION}.zip ."
+                    sh "tar -czf flask-app-${APP_VERSION}.tar.gz ."
                     sh "mkdir -p ${WORKSPACE}/ansible/files"
-                    sh "cp flask-app-${APP_VERSION}.zip ${WORKSPACE}/ansible/files/"
+                    sh "cp flask-app-${APP_VERSION}.tar.gz ${WORKSPACE}/ansible/files/"
                 }
             }
         }
@@ -27,7 +27,7 @@ pipeline {
         stage('Deploy with Ansible') {
             steps {
                 sshagent(['ansible_key']) {
-                    sh "ansible-playbook -i ${ANSIBLE_INVENTORY} ${WORKSPACE}/ansible/deploy_flask.yml -e app_version=${APP_VERSION}"
+                    sh "ansible-playbook -i ${ANSIBLE_INVENTORY} ${WORKSPACE}/ansible/deploy_flask.yml -e app_version=${APP_VERSION} -e archive_ext=tar.gz"
                 }
             }
         }
