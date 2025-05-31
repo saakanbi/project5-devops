@@ -1,0 +1,89 @@
+---
+- name: Setup Monitoring
+  hosts: flask_servers
+  become: yes
+  vars:
+    prometheus_port: "{{ prometheus_port }}"
+    grafana_port: 3000
+    prometheus_config_dir: /etc/prometheus
+    grafana_config_dir: /etc/grafana
+    
+  tasks:
+    - name: Install Prometheus
+      package:
+        name: prometheus
+        state: present
+        
+    - name: Create Prometheus config directory
+      file:
+        path: "{{ prometheus_config_dir }}"
+        state: directory
+        mode: '0755'
+        
+    - name: Configure Prometheus
+      template:
+        src: templates/prometheus.yml.j2
+        dest: "{{ prometheus_config_dir }}/prometheus.yml"
+      notify: Restart Prometheus
+        
+    - name: Install Grafana
+      package:
+        name: grafana
+        state: present
+        
+    - name: Copy Grafana dashboard
+      copy:
+        src: files/grafana-dashboard.json
+        dest: /tmp/dashboard.json
+        
+    - name: Start and enable Prometheus
+      systemd:
+        name: prometheus
+        state: started
+        enabled: yes
+        
+    - name: Start and enable Grafana
+      systemd:
+        name: grafana-server
+        state: started
+        enabled: yes
+        
+    - name: Wait for Grafana to start
+      wait_for:
+        port: "{{ grafana_port }}"
+        delay: 10
+        
+    - name: Create Grafana datasource
+      uri:
+        url: http://localhost:{{ grafana_port }}/api/datasources
+        method: POST
+        user: admin
+        password: admin
+        force_basic_auth: yes
+        body_format: json
+        body:
+          name: "Prometheus"
+          type: "prometheus"
+          url: "http://localhost:{{ prometheus_port }}"
+          access: "proxy"
+          isDefault: true
+        status_code: 200,409
+        
+    - name: Import Grafana dashboard
+      uri:
+        url: http://localhost:{{ grafana_port }}/api/dashboards/db
+        method: POST
+        user: admin
+        password: admin
+        force_basic_auth: yes
+        body_format: json
+        body:
+          dashboard: "{{ lookup('file', '/tmp/dashboard.json') | from_json }}"
+          overwrite: true
+        status_code: 200
+        
+  handlers:
+    - name: Restart Prometheus
+      systemd:
+        name: prometheus
+        state: restarted

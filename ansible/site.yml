@@ -4,12 +4,16 @@
   gather_facts: no
   roles:
     - flask_app
+  tags:
+    - flask
 
 - name: Configure Jenkins Server
   hosts: jenkins
   become: true
   gather_facts: no
   roles:
+    - jenkins
+  tags:
     - jenkins
 
 - name: Configure SonarQube Server
@@ -18,12 +22,16 @@
   gather_facts: no
   roles:
     - sonarqube
+  tags:
+    - sonarqube
 
 - name: Configure Nexus Server
   hosts: nexus
   become: true
   gather_facts: no
   roles:
+    - nexus
+  tags:
     - nexus
 
 - name: Configure Monitoring Stack
@@ -32,3 +40,5 @@
   gather_facts: no
   roles:
     - monitoring_stack
+  tags:
+    - monitoring

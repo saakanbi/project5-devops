@@ -1,0 +1,59 @@
+---
+- name: Deploy Flask Application
+  hosts: flask_servers
+  become: yes
+  vars:
+    app_version: "{{ app_version }}"
+    app_dir: /opt/flask-app
+    app_user: flask
+    app_port: 5000
+    prometheus_port: "{{ prometheus_port }}"
+    
+  tasks:
+    - name: Ensure app directory exists
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        mode: '0755'
+        
+    - name: Create app user
+      user:
+        name: "{{ app_user }}"
+        system: yes
+        
+    - name: Copy application package
+      copy:
+        src: files/flask-app-{{ app_version }}.zip
+        dest: /tmp/flask-app-{{ app_version }}.zip
+        
+    - name: Unzip application
+      unarchive:
+        src: /tmp/flask-app-{{ app_version }}.zip
+        dest: "{{ app_dir }}"
+        remote_src: yes
+        
+    - name: Install Python dependencies
+      pip:
+        requirements: "{{ app_dir }}/requirements.txt"
+        
+    - name: Create systemd service file
+      template:
+        src: templates/flask-app.service.j2
+        dest: /etc/systemd/system/flask-app.service
+        
+    - name: Start and enable Flask application
+      systemd:
+        name: flask-app
+        state: restarted
+        enabled: yes
+        daemon_reload: yes
+        
+    - name: Configure firewall
+      firewalld:
+        port: "{{ item }}/tcp"
+        permanent: yes
+        state: enabled
+      with_items:
+        - "{{ app_port }}"
+        - "{{ prometheus_port }}"
+      notify: Reload firewall
