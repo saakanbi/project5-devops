@@ -18,11 +18,18 @@ pipeline {
             steps {
                 withSonarQubeEnv('SonarQube') {
                     sh '''
-                        docker run --rm -v "${WORKSPACE}:/usr/src" \
-                          sonarsource/sonar-scanner-cli:4.7 \
-                          -Dsonar.projectKey=project_5 \
-                          -Dsonar.sources=. \
-                          -Dsonar.host.url=http://54.163.254.206:9000
+                        # Install required packages
+                        apt-get update && apt-get install -y wget unzip || yum install -y wget unzip
+                        
+                        # Download and install SonarScanner
+                        wget https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-4.7.0.2747-linux.zip
+                        unzip -o sonar-scanner-cli-4.7.0.2747-linux.zip
+                        
+                        # Run SonarScanner
+                        ./sonar-scanner-4.7.0.2747-linux/bin/sonar-scanner \
+                        -Dsonar.projectKey=project_5 \
+                        -Dsonar.sources=. \
+                        -Dsonar.host.url=http://54.163.254.206:9000
                     '''
                 }
             }
