@@ -87,9 +87,17 @@ EOF
                         
                         # SSH to server and deploy
                         ssh -o StrictHostKeyChecking=no ec2-user@${FLASK_SERVER} "
+                            # Clean up existing processes
+                            sudo systemctl stop flask-app || true
+                            sudo systemctl stop nginx || true
+                            sudo pkill -f gunicorn || true
+                            sudo pkill -f flask || true
+                            sudo fuser -k 80/tcp || true
+                            sudo fuser -k 8000/tcp || true
+                            
                             # Install Nginx if not already installed
                             if ! command -v nginx &> /dev/null; then
-                                sudo amazon-linux-extras install nginx1 -y
+                                sudo amazon-linux-extras install nginx1 -y || sudo yum install -y nginx
                             fi
                             
                             sudo mkdir -p /opt/flask-app
@@ -122,12 +130,14 @@ server {
 
     location / {
         proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header Host \\$host;
+        proxy_set_header X-Real-IP \\$remote_addr;
     }
     
     location /metrics {
         proxy_pass http://127.0.0.1:8000/metrics;
+        proxy_set_header Host \\$host;
+        proxy_set_header X-Real-IP \\$remote_addr;
     }
 }
 EOF'
@@ -135,12 +145,17 @@ EOF'
                             # Remove default nginx config if it exists
                             sudo rm -f /etc/nginx/conf.d/default.conf
                             
+                            # Test Nginx config
+                            sudo nginx -t
+                            
                             # Reload systemd, restart services
                             sudo systemctl daemon-reload
                             sudo systemctl enable flask-app
                             sudo systemctl restart flask-app
+                            sleep 5
                             sudo systemctl enable nginx
                             sudo systemctl restart nginx
+                            sleep 5
                             
                             # Check if services are running
                             echo 'Gunicorn service status:'
@@ -149,9 +164,13 @@ EOF'
                             echo 'Nginx service status:'
                             sudo systemctl status nginx
                             
+                            # Check listening ports
+                            echo 'Listening ports:'
+                            sudo netstat -tulpn | grep -E ':(80|8000)' || echo 'No processes listening on required ports'
+                            
                             # Verify app is accessible
                             echo 'Testing application:'
-                            curl -s http://localhost/health || echo 'Health check failed'
+                            curl -v http://localhost/health || echo 'Health check failed'
                             
                             # Verify services are running
                             if sudo systemctl is-active --quiet flask-app && sudo systemctl is-active --quiet nginx; then
@@ -179,6 +198,3 @@ EOF'
         }
     }
 }
-// This Jenkinsfile defines a CI/CD pipeline for deploying a Flask application with monitoring capabilities.
-// It includes stages for checking out the code, performing SonarQube analysis, packaging the application,
-// and deploying it to a remote server. The deployment includes setting up Gunicorn and Nginx, and it       
