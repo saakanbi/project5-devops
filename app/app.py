@@ -1,11 +1,33 @@
-from flask import Flask
-from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
+from flask import Flask, render_template, request
+from prometheus_metrics import REQUEST_COUNT, DASHBOARD_VIEWS, HTTP_REQUEST_TOTAL, get_metrics, CONTENT_TYPE_LATEST
+import threading
+import time
 
 app = Flask(__name__)
 
-# Create metrics
-REQUEST_COUNT = Counter('app_requests_total', 'Total app requests')
-DASHBOARD_VIEWS = Counter('app_dashboard_views', 'Dashboard page views')
+@app.before_request
+def before_request():
+    request.start_time = time.time()
+
+@app.after_request
+def after_request(response):
+    request_latency = time.time() - request.start_time
+    HTTP_REQUEST_TOTAL.labels(
+        method=request.method,
+        endpoint=request.path,
+        status=response.status_code
+    ).inc()
+    return response
+
+# Background thread for periodic GC metrics collection
+def metrics_collector():
+    while True:
+        # Update metrics every 15 seconds
+        time.sleep(15)
+
+# Start metrics collector thread
+collector_thread = threading.Thread(target=metrics_collector, daemon=True)
+collector_thread.start()
 
 @app.route('/')
 def dashboard():
@@ -32,7 +54,7 @@ def dashboard():
 @app.route('/metrics')
 def metrics():
     REQUEST_COUNT.inc()
-    return generate_latest(), 200, {'Content-Type': CONTENT_TYPE_LATEST}
+    return get_metrics(), 200, {'Content-Type': CONTENT_TYPE_LATEST}
 
 @app.route('/health')
 def health():

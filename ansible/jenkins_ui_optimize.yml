@@ -1,0 +1,42 @@
+---
+- name: Optimize Jenkins UI Performance
+  hosts: jenkins
+  gather_facts: no
+  become: yes
+  tasks:
+    - name: Wait for SSH connection
+      raw: echo "Connected"
+      register: connection_test
+      retries: 10
+      delay: 5
+      until: connection_test is success
+
+    # Include the Jenkins UI optimization tasks
+    - include_tasks: roles/jenkins/tasks/optimize_jenkins_ui.yml
+
+    - name: Create Jenkins UI cache cleanup script
+      raw: |
+        cat > /home/ec2-user/clean-jenkins-cache.sh << 'EOF'
+        #!/bin/bash
+        # Clean up Jenkins UI cache files
+        docker exec jenkins rm -rf /var/jenkins_home/fingerprints/*
+        docker exec jenkins find /var/jenkins_home/ -name "*.tmp" -delete
+        docker exec jenkins find /var/jenkins_home/ -name "*.bak" -delete
+        docker exec jenkins find /var/jenkins_home/jobs/ -name "lastStable" -o -name "lastSuccessful" -o -name "lastUnstable" -o -name "lastUnsuccessful" -o -name "lastFailedBuild" | xargs -r rm -rf
+        EOF
+        chmod +x /home/ec2-user/clean-jenkins-cache.sh
+      ignore_errors: true
+
+    - name: Schedule Jenkins UI cache cleanup
+      raw: echo "0 1 * * * /home/ec2-user/clean-jenkins-cache.sh" | crontab -
+      ignore_errors: true
+
+    - name: Get Jenkins URL
+      raw: 'echo "Jenkins URL: http://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4):8080"'
+      register: jenkins_url
+      ignore_errors: true
+
+    - name: Display Jenkins URL
+      debug:
+        var: jenkins_url.stdout_lines
+      ignore_errors: true

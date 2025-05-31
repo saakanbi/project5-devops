@@ -91,6 +91,15 @@ module "flask_app" {
   }
 }
 
+# Elastic IP for Flask App
+resource "aws_eip" "flask_app_eip" {
+  instance = module.flask_app.id
+  domain   = "vpc"
+  tags = {
+    Name = "flask-app-eip"
+  }
+}
+
 # ----------------------------
 # EC2 - Jenkins (Public Subnet)
 # ----------------------------
@@ -104,6 +113,15 @@ module "jenkins" {
   user_data           = file("./scripts/jenkins_user_data.sh")
   tags = {
     Name = "jenkins"
+  }
+}
+
+# Elastic IP for Jenkins
+resource "aws_eip" "jenkins_eip" {
+  instance = module.jenkins.id
+  domain   = "vpc"
+  tags = {
+    Name = "jenkins-eip"
   }
 }
 
@@ -123,6 +141,15 @@ module "sonarqube" {
   }
 }
 
+# Elastic IP for SonarQube
+resource "aws_eip" "sonarqube_eip" {
+  instance = module.sonarqube.id
+  domain   = "vpc"
+  tags = {
+    Name = "sonarqube-eip"
+  }
+}
+
 # ----------------------------
 # EC2 - Nexus (Public Subnet)
 # ----------------------------
@@ -139,6 +166,15 @@ module "nexus" {
   }
 }
 
+# Elastic IP for Nexus
+resource "aws_eip" "nexus_eip" {
+  instance = module.nexus.id
+  domain   = "vpc"
+  tags = {
+    Name = "nexus-eip"
+  }
+}
+
 # ----------------------------
 # EC2 - Monitoring (Prometheus + Grafana) (Public Subnet)
 # ----------------------------
@@ -152,6 +188,15 @@ module "monitoring_stack" {
   user_data           = file("./scripts/monitoring_user_data.sh")
   tags = {
     Name = "monitoring-stack"
+  }
+}
+
+# Elastic IP for Monitoring Stack
+resource "aws_eip" "monitoring_eip" {
+  instance = module.monitoring_stack.id
+  domain   = "vpc"
+  tags = {
+    Name = "monitoring-eip"
   }
 }
 

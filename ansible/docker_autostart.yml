@@ -1,0 +1,58 @@
+---
+- name: Configure Docker containers to auto-restart
+  hosts: all
+  become: true
+  tasks:
+    - name: Ensure Docker is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Configure Jenkins container to auto-restart
+      shell: |
+        docker stop jenkins || true
+        docker rm jenkins || true
+        docker run -d --name jenkins -p 8080:8080 -p 50000:50000 -v jenkins_home:/var/jenkins_home --restart=always jenkins/jenkins:lts
+      when: inventory_hostname in groups['jenkins']
+      ignore_errors: yes
+
+    - name: Configure SonarQube container to auto-restart
+      shell: |
+        docker stop sonarqube || true
+        docker rm sonarqube || true
+        docker run -d --name sonarqube -p 9000:9000 --restart=always sonarqube
+      when: inventory_hostname in groups['sonarqube']
+      ignore_errors: yes
+
+    - name: Configure Nexus container to auto-restart
+      shell: |
+        docker stop nexus || true
+        docker rm nexus || true
+        docker run -d --name nexus -p 8081:8081 -v nexus-data:/sonatype-work --restart=always sonatype/nexus3
+      when: inventory_hostname in groups['nexus']
+      ignore_errors: yes
+
+    - name: Configure Prometheus container to auto-restart
+      shell: |
+        docker stop prometheus || true
+        docker rm prometheus || true
+        docker run -d --name prometheus -p 9090:9090 -v /home/ec2-user/prometheus:/etc/prometheus --restart=always prom/prometheus
+      when: inventory_hostname in groups['monitoring']
+      ignore_errors: yes
+
+    - name: Configure Grafana container to auto-restart
+      shell: |
+        docker stop grafana || true
+        docker rm grafana || true
+        docker run -d --name grafana -p 3000:3000 --restart=always grafana/grafana
+      when: inventory_hostname in groups['monitoring']
+      ignore_errors: yes
+
+    - name: Configure Node Exporter container to auto-restart
+      shell: |
+        docker stop node-exporter || true
+        docker rm node-exporter || true
+        docker run -d --name node-exporter -p 9100:9100 --restart=always quay.io/prometheus/node-exporter
+      when: inventory_hostname in groups['monitoring']
+      ignore_errors: yes

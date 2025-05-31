@@ -2,16 +2,12 @@ pipeline {
     agent any
     
     environment {
-        FLASK_ALB_DNS = "flask-app-alb-416560770.us-east-1.elb.amazonaws.com"
-        FLASK_APP_IP = "44.203.53.132"
-        JENKINS_IP = "18.212.250.55"
-        MONITORING_IP = "54.159.146.237"
-        NEXUS_URL = "http://54.91.22.91:8081"
-        NEXUS_REPOSITORY = "flask-app-repo"
-        NEXUS_CREDENTIAL_ID = "nexus-credentials"
-        SONARQUBE_URL = "http://54.91.58.139:9000"
         IMAGE_NAME = "flask-app"
         IMAGE_TAG = "${env.BUILD_NUMBER}"
+        FLASK_HOST = "3.222.89.93" // Your Flask app Elastic IP
+        NEXUS_URL = "http://44.218.100.248:8081" // Your Nexus Elastic IP
+        NEXUS_REPOSITORY = "flask-app" // Repository name in Nexus
+        PROMETHEUS_PORT = "9090" // Prometheus port
     }
     
     stages {
@@ -21,21 +17,13 @@ pipeline {
             }
         }
         
-        stage('Build Application') {
-            steps {
-                dir('app') {
-                    sh 'pip install -r requirements.txt'
-                    sh 'python -m pytest'
-                }
-            }
-        }
-        
         stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('SonarQube') {
-                    sh 'pip install pytest pytest-cov'
-                    sh 'cd app && python -m pytest --cov=. --cov-report=xml:../coverage.xml'
-                    sh "sonar-scanner -Dsonar.host.url=${SONARQUBE_URL}"
+                    sh 'cd app && pip install -r requirements.txt'
+                    sh 'cd app && pip install pytest pytest-cov'
+                    sh 'cd app && pytest --cov=. --cov-report=xml:../coverage.xml'
+                    sh 'sonar-scanner'
                 }
             }
         }
@@ -48,6 +36,19 @@ pipeline {
             }
         }
         
+        stage('Publish to Nexus') {
+            steps {
+                dir('app') {
+                    sh "zip -r flask-app-${IMAGE_TAG}.zip ."
+                    withCredentials([usernamePassword(credentialsId: 'nexus-credentials', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                        sh """
+                            curl -v -u ${NEXUS_USER}:${NEXUS_PASS} --upload-file flask-app-${IMAGE_TAG}.zip ${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/flask-app/flask-app-${IMAGE_TAG}.zip
+                        """
+                    }
+                }
+            }
+        }
+        
         stage('Build Docker Image') {
             steps {
                 dir('app') {
@@ -56,65 +57,65 @@ pipeline {
             }
         }
         
-        stage('Push to Nexus') {
-            steps {
-                withCredentials([usernamePassword(credentialsId: "${NEXUS_CREDENTIAL_ID}", passwordVariable: 'NEXUS_PASSWORD', usernameVariable: 'NEXUS_USERNAME')]) {
-                    sh "docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/${IMAGE_NAME}:${IMAGE_TAG}"
-                    sh "echo ${NEXUS_PASSWORD} | docker login ${NEXUS_URL} -u ${NEXUS_USERNAME} --password-stdin"
-                    sh "docker push ${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/${IMAGE_NAME}:${IMAGE_TAG}"
-                }
-            }
-        }
-        
         stage('Deploy') {
             steps {
-                echo 'Deploying application to Flask server'
-                sshagent(['flask-ssh-key']) {
+                sshagent(['ec2-ssh-key']) {
                     sh """
-                        ssh ec2-user@${FLASK_APP_IP} 'docker pull ${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/${IMAGE_NAME}:${IMAGE_TAG}'
-                        ssh ec2-user@${FLASK_APP_IP} 'docker stop flask-app || true'
-                        ssh ec2-user@${FLASK_APP_IP} 'docker rm flask-app || true'
-                        ssh ec2-user@${FLASK_APP_IP} 'docker run -d -p 80:5000 --name flask-app ${NEXUS_URL}/repository/${NEXUS_REPOSITORY}/${IMAGE_NAME}:${IMAGE_TAG}'
+                        ssh -o StrictHostKeyChecking=no ec2-user@${FLASK_HOST} '
+                            docker stop flask-app || true
+                            docker rm flask-app || true
+                            docker run -d --name flask-app -p 80:5000 -p 9090:9090 --restart=always ${IMAGE_NAME}:${IMAGE_TAG}
+                        '
                     """
                 }
             }
         }
         
-        stage('Update Prometheus Config') {
+        stage('Setup Monitoring') {
             steps {
-                sshagent(['monitoring-ssh-key']) {
+                sshagent(['ec2-ssh-key']) {
                     sh """
-                        ssh ec2-user@${MONITORING_IP} 'cat > prometheus.yml << EOF
+                        scp -o StrictHostKeyChecking=no ${WORKSPACE}/grafana-dashboard.json ec2-user@${FLASK_HOST}:~/dashboard.json
+                        ssh -o StrictHostKeyChecking=no ec2-user@${FLASK_HOST} '
+                            # Create prometheus config
+                            cat > prometheus.yml << EOF
 global:
   scrape_interval: 15s
 
 scrape_configs:
-  - job_name: "prometheus"
+  - job_name: "flask-app"
     static_configs:
-      - targets: ["localhost:9090"]
-
-  - job_name: "flask_dashboard"
-    metrics_path: /metrics
-    static_configs:
-      - targets: ["${FLASK_APP_IP}:80"]
-
-  - job_name: "node_exporter"
-    static_configs:
-      - targets: ["localhost:9100"]
-EOF'
-                        ssh ec2-user@${MONITORING_IP} 'docker cp prometheus.yml prometheus:/etc/prometheus/'
-                        ssh ec2-user@${MONITORING_IP} 'curl -X POST http://localhost:9090/-/reload'
-                    """
-                }
-            }
-        }
-        
-        stage('Update Grafana Dashboard') {
-            steps {
-                sshagent(['monitoring-ssh-key']) {
-                    sh """
-                        scp grafana/dashboards/flask_metrics.json ec2-user@${MONITORING_IP}:~/flask_metrics.json
-                        ssh ec2-user@${MONITORING_IP} 'curl -X POST http://localhost:3000/api/dashboards/db -H "Content-Type: application/json" -d @flask_metrics.json'
+      - targets: ["localhost:5000"]
+    metrics_path: "/metrics"
+EOF
+                            
+                            # Run Prometheus container if not already running
+                            docker ps | grep prometheus || docker run -d \\
+                              --name prometheus \\
+                              -p 9090:9090 \\
+                              -v \$(pwd)/prometheus.yml:/etc/prometheus/prometheus.yml \\
+                              prom/prometheus
+                              
+                            # Setup Grafana if not already running
+                            docker ps | grep grafana || docker run -d \\
+                              --name grafana \\
+                              -p 3000:3000 \\
+                              --link prometheus:prometheus \\
+                              grafana/grafana
+                              
+                            # Wait for Grafana to start
+                            sleep 10
+                              
+                            # Create Grafana datasource
+                            curl -s -X POST -H "Content-Type: application/json" \\
+                              -d '\''{"name":"Prometheus","type":"prometheus","url":"http://prometheus:9090","access":"proxy","isDefault":true}'\'' \\
+                              http://admin:admin@localhost:3000/api/datasources || true
+                              
+                            # Import dashboard
+                            curl -s -X POST -H "Content-Type: application/json" \\
+                              -d '\''{"dashboard": '\''$(cat dashboard.json | tr -d "\\n")'\'',"overwrite": true}'\'' \\
+                              http://admin:admin@localhost:3000/api/dashboards/db || true
+                        '
                     """
                 }
             }
@@ -122,14 +123,7 @@ EOF'
     }
     
     post {
-        success {
-            echo 'Pipeline completed successfully!'
-        }
-        failure {
-            echo 'Pipeline failed!'
-        }
         always {
-            sh "docker logout ${NEXUS_URL} || true"
             cleanWs()
         }
     }

@@ -1,0 +1,93 @@
+---
+- name: Stop existing Jenkins container
+  raw: docker stop jenkins || true
+  ignore_errors: true
+
+- name: Remove existing Jenkins container
+  raw: docker rm jenkins || true
+  ignore_errors: true
+
+- name: Create Jenkins data directory if it doesn't exist
+  raw: mkdir -p /home/ec2-user/jenkins_home
+  ignore_errors: true
+
+- name: Set permissions for Jenkins data directory
+  raw: chown 1000:1000 /home/ec2-user/jenkins_home
+  ignore_errors: true
+
+- name: Run optimized Jenkins container with UI performance tweaks
+  raw: >
+    docker run -d --name jenkins 
+    -p 8080:8080 -p 50000:50000 
+    -v /home/ec2-user/jenkins_home:/var/jenkins_home 
+    -e JAVA_OPTS="-Xmx2g -Xms1g -Dhudson.model.DirectoryBrowserSupport.CSP= -Djenkins.ui.refresh=true" 
+    --restart always
+    --memory=3g --memory-swap=6g --cpu-shares=2048
+    jenkins/jenkins:lts-jdk17
+  ignore_errors: true
+
+- name: Wait for Jenkins to start
+  raw: sleep 60
+  ignore_errors: true
+
+- name: Create Jenkins UI performance tuning script
+  raw: |
+    cat > /home/ec2-user/tune-jenkins.sh << 'EOF'
+    #!/bin/bash
+    
+    # Wait for Jenkins to be fully up
+    echo "Waiting for Jenkins to start..."
+    for i in {1..30}; do
+      if docker exec jenkins curl -s -I http://localhost:8080/ | grep -q "200 OK"; then
+        echo "Jenkins is up!"
+        break
+      fi
+      echo "Waiting... ($i/30)"
+      sleep 10
+    done
+    
+    # Get initial admin password
+    JENKINS_PASSWORD=$(docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword || echo "admin")
+    
+    # Reduce number of builds kept
+    docker exec jenkins bash -c 'find /var/jenkins_home/jobs -type d -name "builds" -exec find {} -type d -name "[0-9]*" -mtime +5 \; | xargs rm -rf'
+    
+    # Clean up workspace
+    docker exec jenkins bash -c 'find /var/jenkins_home/jobs -type d -name "workspace" -exec rm -rf {}/* \;'
+    
+    # Remove old logs
+    docker exec jenkins bash -c 'find /var/jenkins_home/logs -mtime +2 -delete'
+    
+    # Clean up temp files
+    docker exec jenkins bash -c 'find /var/jenkins_home -name "*.tmp" -delete'
+    docker exec jenkins bash -c 'find /var/jenkins_home -name "*.bak" -delete'
+    
+    # Restart Jenkins for changes to take effect
+    docker restart jenkins
+    
+    echo "Jenkins UI optimization complete!"
+    EOF
+    chmod +x /home/ec2-user/tune-jenkins.sh
+  ignore_errors: true
+
+- name: Run Jenkins UI performance tuning script
+  raw: /home/ec2-user/tune-jenkins.sh
+  ignore_errors: true
+
+- name: Create Jenkins UI cache cleanup cron job
+  raw: |
+    cat > /home/ec2-user/clean-jenkins-cache.sh << 'EOF'
+    #!/bin/bash
+    # Clean up Jenkins UI cache files
+    docker exec jenkins bash -c 'find /var/jenkins_home/fingerprints -type f -mtime +5 -delete'
+    docker exec jenkins bash -c 'find /var/jenkins_home/ -name "*.tmp" -delete'
+    docker exec jenkins bash -c 'find /var/jenkins_home/ -name "*.bak" -delete'
+    docker exec jenkins bash -c 'find /var/jenkins_home/jobs/ -name "lastStable" -o -name "lastSuccessful" -o -name "lastUnstable" -o -name "lastUnsuccessful" -o -name "lastFailedBuild" | xargs rm -rf'
+    # Restart Jenkins weekly for memory cleanup
+    if [ $(date +%w) -eq 0 ]; then
+      docker restart jenkins
+    fi
+    EOF
+    chmod +x /home/ec2-user/clean-jenkins-cache.sh
+    echo "0 1 * * * /home/ec2-user/clean-jenkins-cache.sh" | crontab -
+  ignore_errors: true
