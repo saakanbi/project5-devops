@@ -49,7 +49,10 @@ pipeline {
         stage('Deploy with Ansible') {
             steps {
                 sshagent(['ansible-key']) {
-                    sh "ansible-playbook -i ${ANSIBLE_INVENTORY} ${WORKSPACE}/ansible/deploy_flask.yml -e app_version=${APP_VERSION}"
+                    sh '''
+                        cd "${WORKSPACE}"
+                        ansible-playbook -i ${ANSIBLE_INVENTORY} ansible/deploy_flask.yml -e app_version=${APP_VERSION} -e app_files_dir="${WORKSPACE}/ansible/files"
+                    '''
                 }
             }
         }
@@ -57,7 +60,10 @@ pipeline {
         stage('Setup Monitoring') {
             steps {
                 sshagent(['ansible-key']) {
-                    sh "ansible-playbook -i ${ANSIBLE_INVENTORY} ${WORKSPACE}/ansible/site.yml --tags monitoring"
+                    sh '''
+                        cd "${WORKSPACE}"
+                        ansible-playbook -i ${ANSIBLE_INVENTORY} ansible/site.yml --tags monitoring
+                    '''
                 }
             }
         }
