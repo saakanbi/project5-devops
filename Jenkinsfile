@@ -46,25 +46,42 @@ pipeline {
             }
         }
         
+        stage('Install Ansible') {
+            steps {
+                sh '''
+                    # Check if ansible is installed
+                    if ! command -v ansible &> /dev/null; then
+                        echo "Installing Ansible..."
+                        pip install ansible
+                    fi
+                    
+                    # Verify installation
+                    ansible --version
+                '''
+            }
+        }
+        
         stage('Deploy with Ansible') {
             steps {
-                sshagent(['ansible-key']) {
-                    sh '''
-                        cd "${WORKSPACE}"
-                        ansible-playbook -i ${ANSIBLE_INVENTORY} ansible/deploy_flask.yml -e app_version=${APP_VERSION} -e app_files_dir="${WORKSPACE}/ansible/files"
-                    '''
-                }
+                sh '''
+                    cd "${WORKSPACE}"
+                    echo "Current directory: $(pwd)"
+                    echo "Ansible inventory: ${ANSIBLE_INVENTORY}"
+                    echo "Checking if inventory exists: $(ls -la ${ANSIBLE_INVENTORY} 2>/dev/null || echo 'NOT FOUND')"
+                    echo "Checking if playbook exists: $(ls -la ansible/deploy_flask.yml 2>/dev/null || echo 'NOT FOUND')"
+                    
+                    # Run ansible-playbook with verbose output
+                    ansible-playbook -i ${ANSIBLE_INVENTORY} ansible/deploy_flask.yml -e app_version=${APP_VERSION} -e app_files_dir="${WORKSPACE}/ansible/files" -vvv
+                '''
             }
         }
         
         stage('Setup Monitoring') {
             steps {
-                sshagent(['ansible-key']) {
-                    sh '''
-                        cd "${WORKSPACE}"
-                        ansible-playbook -i ${ANSIBLE_INVENTORY} ansible/site.yml --tags monitoring
-                    '''
-                }
+                sh '''
+                    cd "${WORKSPACE}"
+                    ansible-playbook -i ${ANSIBLE_INVENTORY} ansible/site.yml --tags monitoring -vvv
+                '''
             }
         }
     }
