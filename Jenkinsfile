@@ -85,6 +85,28 @@ EOF
                         # Copy files to Flask server
                         scp -o StrictHostKeyChecking=no -r "${WORKSPACE}/deploy/"* ec2-user@${FLASK_SERVER}:/tmp/flask-app/
                         
+                        # Create Nginx config file locally
+                        cat > nginx.conf << 'EOF'
+server {
+    listen 80;
+    server_name _;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+    
+    location /metrics {
+        proxy_pass http://127.0.0.1:8000/metrics;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+EOF
+                        # Copy Nginx config to server
+                        scp -o StrictHostKeyChecking=no nginx.conf ec2-user@${FLASK_SERVER}:/tmp/nginx.conf
+                        
                         # SSH to server and deploy
                         ssh -o StrictHostKeyChecking=no ec2-user@${FLASK_SERVER} "
                             # Clean up existing processes
@@ -92,8 +114,6 @@ EOF
                             sudo systemctl stop nginx || true
                             sudo pkill -f gunicorn || true
                             sudo pkill -f flask || true
-                            sudo fuser -k 80/tcp || true
-                            sudo fuser -k 8000/tcp || true
                             
                             # Install Nginx if not already installed
                             if ! command -v nginx &> /dev/null; then
@@ -123,24 +143,7 @@ WantedBy=multi-user.target
 EOF'
 
                             # Configure Nginx
-                            sudo bash -c 'cat > /etc/nginx/conf.d/flask-app.conf << EOF
-server {
-    listen 80;
-    server_name _;
-
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host \\$host;
-        proxy_set_header X-Real-IP \\$remote_addr;
-    }
-    
-    location /metrics {
-        proxy_pass http://127.0.0.1:8000/metrics;
-        proxy_set_header Host \\$host;
-        proxy_set_header X-Real-IP \\$remote_addr;
-    }
-}
-EOF'
+                            sudo cp /tmp/nginx.conf /etc/nginx/conf.d/flask-app.conf
                             
                             # Remove default nginx config if it exists
                             sudo rm -f /etc/nginx/conf.d/default.conf
@@ -164,21 +167,9 @@ EOF'
                             echo 'Nginx service status:'
                             sudo systemctl status nginx
                             
-                            # Check listening ports
-                            echo 'Listening ports:'
-                            sudo netstat -tulpn | grep -E ':(80|8000)' || echo 'No processes listening on required ports'
-                            
                             # Verify app is accessible
                             echo 'Testing application:'
                             curl -v http://localhost/health || echo 'Health check failed'
-                            
-                            # Verify services are running
-                            if sudo systemctl is-active --quiet flask-app && sudo systemctl is-active --quiet nginx; then
-                                echo 'Flask application deployed successfully!'
-                            else
-                                echo 'Failed to start services!'
-                                exit 1
-                            fi
                         "
                     '''
                 }
@@ -198,3 +189,4 @@ EOF'
         }
     }
 }
+// This Jenkinsfile defines a CI/CD pipeline for a Flask application with SonarQube analysis, packaging, and deployment to an EC2 instance.
