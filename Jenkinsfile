@@ -30,12 +30,64 @@ pipeline {
             }
         }
         
-        stage('Deploy with Ansible') {
+        stage('Package Application') {
             steps {
                 sh '''
-                    cd ansible
-                    ansible-playbook -i inventory deploy.yml -e "app_version=${APP_VERSION} app_dir=/opt/flask_dashboard app_user=ec2-user app_port=8000"
+                    # Create deploy directory
+                    mkdir -p "${WORKSPACE}/deploy"
+                    
+                    # Copy application files
+                    cp -r app/* "${WORKSPACE}/deploy/"
+                    
+                    # Create version file
+                    echo "${APP_VERSION}" > "${WORKSPACE}/deploy/VERSION"
                 '''
+            }
+        }
+        
+        stage('Deploy Application') {
+            steps {
+                sshagent(['ec2-ssh-key']) {
+                    sh '''
+                        # Create remote directory
+                        ssh -o StrictHostKeyChecking=no ec2-user@${FLASK_SERVER} "mkdir -p /tmp/flask-app"
+                        
+                        # Copy files to Flask server
+                        scp -o StrictHostKeyChecking=no -r "${WORKSPACE}/deploy/"* ec2-user@${FLASK_SERVER}:/tmp/flask-app/
+                        
+                        # SSH to server and deploy
+                        ssh -o StrictHostKeyChecking=no ec2-user@${FLASK_SERVER} "
+                            sudo mkdir -p /opt/flask_dashboard
+                            sudo cp -r /tmp/flask-app/* /opt/flask_dashboard/
+                            cd /opt/flask_dashboard
+                            sudo pip3 install -r requirements.txt
+                            
+                            # Create systemd service for Gunicorn
+                            sudo bash -c 'cat > /etc/systemd/system/flaskapp.service << EOF
+[Unit]
+Description=Gunicorn Flask Dashboard
+After=network.target
+
+[Service]
+User=ec2-user
+WorkingDirectory=/opt/flask_dashboard
+ExecStart=/usr/local/bin/gunicorn --workers 3 --bind 127.0.0.1:8000 app:app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF'
+                            
+                            # Reload systemd and start flaskapp
+                            sudo systemctl daemon-reload
+                            sudo systemctl enable flaskapp
+                            sudo systemctl restart flaskapp
+                            
+                            # Ensure Nginx is configured and running
+                            sudo systemctl restart nginx
+                        "
+                    '''
+                }
             }
         }
         
@@ -65,4 +117,4 @@ pipeline {
         }
     }
 }
-// This Jenkinsfile defines a CI/CD pipeline for a Flask application with SonarQube analysis and Ansible deployment.
+// This Jenkinsfile defines a CI/CD pipeline for deploying a Flask application with SonarQube analysis, packaging, and deployment to an EC2 instance.
