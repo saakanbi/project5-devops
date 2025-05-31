@@ -49,8 +49,20 @@ pipeline {
             steps {
                 sshagent(['ec2-ssh-key']) {
                     sh '''
-                        # Copy app.py to the Flask server
-                        scp -o StrictHostKeyChecking=no app.py ec2-user@${FLASK_SERVER}:/tmp/app.py
+                        # Create a simplified prometheus_metrics.py
+                        cat > prometheus_metrics.py << 'EOF'
+from prometheus_client import Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST
+import time
+
+# Application metrics
+REQUEST_COUNT = Counter('app_requests_total', 'Total app requests')
+DASHBOARD_VIEWS = Counter('app_dashboard_views_total', 'Dashboard page views')
+HTTP_REQUEST_TOTAL = Counter('flask_http_request_total', 'Total HTTP requests', ['method', 'endpoint', 'status'])
+
+def get_metrics():
+    """Generate latest metrics"""
+    return generate_latest()
+EOF
                         
                         # Create Nginx config file
                         cat > nginx.conf << 'EOF'
@@ -72,22 +84,49 @@ server {
     }
 }
 EOF
-                        # Copy Nginx config to server
-                        scp -o StrictHostKeyChecking=no nginx.conf ec2-user@${FLASK_SERVER}:/tmp/nginx.conf
+                        # Create systemd service file
+                        cat > flaskapp.service << 'EOF'
+[Unit]
+Description=Gunicorn Flask Dashboard
+After=network.target
+
+[Service]
+User=ec2-user
+WorkingDirectory=/opt/flask_dashboard
+ExecStart=/usr/local/bin/gunicorn --workers 3 --bind 0.0.0.0:8000 app:app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+                        
+                        # Copy files to the Flask server
+                        scp -o StrictHostKeyChecking=no app.py prometheus_metrics.py nginx.conf flaskapp.service ec2-user@${FLASK_SERVER}:/tmp/
                         
                         # SSH to the server and deploy the app
                         ssh -o StrictHostKeyChecking=no ec2-user@${FLASK_SERVER} "
-                            # Update app.py
-                            sudo cp /tmp/app.py /opt/flask_dashboard/app.py
+                            # Stop services
+                            sudo systemctl stop flaskapp || true
+                            sudo systemctl stop nginx || true
                             
-                            # Update Nginx config
+                            # Update files
+                            sudo cp /tmp/app.py /opt/flask_dashboard/app.py
+                            sudo cp /tmp/prometheus_metrics.py /opt/flask_dashboard/prometheus_metrics.py
+                            sudo cp /tmp/flaskapp.service /etc/systemd/system/flaskapp.service
                             sudo cp /tmp/nginx.conf /etc/nginx/conf.d/flask-app.conf
+                            
+                            # Remove default Nginx config
                             sudo rm -f /etc/nginx/conf.d/default.conf || true
+                            
+                            # Test Nginx config
                             sudo nginx -t
                             
-                            # Restart services
+                            # Reload systemd and restart services
+                            sudo systemctl daemon-reload
+                            sudo systemctl enable flaskapp
                             sudo systemctl restart flaskapp
                             sleep 3
+                            sudo systemctl enable nginx
                             sudo systemctl restart nginx
                             
                             # Check service status
