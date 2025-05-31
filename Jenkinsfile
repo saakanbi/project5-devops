@@ -47,7 +47,7 @@ pipeline {
         
         stage('Deploy Application') {
             steps {
-                sshagent(['ansible-key']) {
+                sshagent(['ec2-ssh-key']) {
                     sh '''
                         # Copy app.py to the Flask server
                         scp -o StrictHostKeyChecking=no app.py ec2-user@${FLASK_SERVER}:/tmp/app.py
