@@ -1,3 +1,4 @@
+---
 - name: Check if Amazon Linux
   raw: cat /etc/os-release | grep -q "Amazon Linux"
   register: is_amazon_linux
@@ -5,15 +6,13 @@
   ignore_errors: true
 
 - name: Install Python, pip, and Nginx on Amazon Linux
-  raw: amazon-linux-extras install -y nginx1 && yum install -y python3 python3-pip
+  raw: amazon-linux-extras install -y python3 nginx1
   when: is_amazon_linux is succeeded and is_amazon_linux.rc == 0
+  ignore_errors: true
 
 - name: Install Python, pip, and Nginx on other systems
   raw: yum install -y python3 python3-pip nginx || apt-get update && apt-get install -y python3 python3-pip nginx
   when: is_amazon_linux is failed or is_amazon_linux.rc != 0
-
-- name: Ensure Nginx is started and enabled
-  raw: systemctl enable nginx && systemctl start nginx
   ignore_errors: true
 
 - name: Install Python packages
@@ -21,45 +20,68 @@
   ignore_errors: true
 
 - name: Create Flask app directory
-  raw: mkdir -p /opt/flask_dashboard && chown -R ec2-user:ec2-user /opt/flask_dashboard && chmod 755 /opt/flask_dashboard
+  raw: mkdir -p {{ app_dir }} && chown -R {{ app_user }}:{{ app_user }} {{ app_dir }}
   ignore_errors: true
 
 - name: Create simple Flask app file
   raw: |
-    cat > /opt/flask_dashboard/app.py << 'EOF'
-    from flask import Flask, render_template
+    cat > {{ app_dir }}/app.py << 'EOF'
+    from flask import Flask
     from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
 
     app = Flask(__name__)
-    
-    # Create a metric to track requests
+
+    # Create metrics
     REQUEST_COUNT = Counter('app_requests_total', 'Total app requests')
-    
+    DASHBOARD_VIEWS = Counter('app_dashboard_views', 'Dashboard page views')
+
     @app.route('/')
-    def home():
+    def dashboard():
         REQUEST_COUNT.inc()
-        return "Flask Dashboard is running!"
-    
+        DASHBOARD_VIEWS.inc()
+        return '''
+        <html>
+            <head>
+                <title>CEEYIT Dashboard</title>
+                <style>
+                    body { font-family: Arial; background: #fefefe; text-align: center; margin-top: 100px; }
+                    h1 { color: #2a9d8f; }
+                    p { font-size: 18px; color: #264653; }
+                </style>
+            </head>
+            <body>
+                <h1>CEEYIT Monitoring Dashboard</h1>
+                <p>Your DevOps metrics will be visualized here.</p>
+                <p><a href="/metrics">View Prometheus Metrics</a></p>
+            </body>
+        </html>
+        '''
+
     @app.route('/metrics')
     def metrics():
+        REQUEST_COUNT.inc()
         return generate_latest(), 200, {'Content-Type': CONTENT_TYPE_LATEST}
-    
+
+    @app.route('/health')
+    def health():
+        return 'OK', 200
+
     if __name__ == '__main__':
         app.run(host='0.0.0.0', port=8000)
     EOF
-    chown ec2-user:ec2-user /opt/flask_dashboard/app.py
-    chmod 644 /opt/flask_dashboard/app.py
+    chown {{ app_user }}:{{ app_user }} {{ app_dir }}/app.py
+    chmod 644 {{ app_dir }}/app.py
   ignore_errors: true
 
 - name: Create requirements.txt
   raw: |
-    cat > /opt/flask_dashboard/requirements.txt << 'EOF'
+    cat > {{ app_dir }}/requirements.txt << 'EOF'
     flask
     gunicorn
     prometheus_client
     EOF
-    chown ec2-user:ec2-user /opt/flask_dashboard/requirements.txt
-    chmod 644 /opt/flask_dashboard/requirements.txt
+    chown {{ app_user }}:{{ app_user }} {{ app_dir }}/requirements.txt
+    chmod 644 {{ app_dir }}/requirements.txt
   ignore_errors: true
 
 - name: Create systemd service for Gunicorn
@@ -72,7 +94,7 @@
     [Service]
     User=ec2-user
     WorkingDirectory=/opt/flask_dashboard
-    ExecStart=/usr/local/bin/gunicorn --workers 3 --bind 0.0.0.0:8000 app:app
+    ExecStart=/usr/local/bin/gunicorn --workers 3 --bind 127.0.0.1:8000 app:app
     Restart=always
 
     [Install]
@@ -81,25 +103,103 @@
   ignore_errors: true
 
 - name: Reload systemd and start flaskapp
-  raw: systemctl daemon-reload && systemctl enable flaskapp && systemctl start flaskapp
+  raw: systemctl daemon-reload && systemctl enable flaskapp && systemctl restart flaskapp
+  ignore_errors: true
+
+- name: Remove default Nginx config
+  raw: rm -f /etc/nginx/conf.d/default.conf || true
   ignore_errors: true
 
 - name: Configure Nginx
   raw: |
-    cat > /etc/nginx/conf.d/flaskapp.conf << 'EOF'
-    server {
-      listen 80;
-      server_name _;
+    cat > /etc/nginx/nginx.conf << 'EOF'
+    user nginx;
+    worker_processes auto;
+    error_log /var/log/nginx/error.log;
+    pid /run/nginx.pid;
 
-      location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-      }
+    include /usr/share/nginx/modules/*.conf;
+
+    events {
+        worker_connections 1024;
+    }
+
+    http {
+        log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                          '$status $body_bytes_sent "$http_referer" '
+                          '"$http_user_agent" "$http_x_forwarded_for"';
+
+        access_log  /var/log/nginx/access.log  main;
+
+        sendfile            on;
+        tcp_nopush          on;
+        tcp_nodelay         on;
+        keepalive_timeout   65;
+        types_hash_max_size 4096;
+
+        include             /etc/nginx/mime.types;
+        default_type        application/octet-stream;
+
+        server {
+            listen       80;
+            server_name  _;
+            root         /usr/share/nginx/html;
+
+            location / {
+                proxy_pass http://127.0.0.1:8000;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+            }
+
+            location /metrics {
+                proxy_pass http://127.0.0.1:8000/metrics;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+            }
+
+            error_page 404 /404.html;
+            location = /404.html {
+            }
+
+            error_page 500 502 503 504 /50x.html;
+            location = /50x.html {
+            }
+        }
     }
     EOF
   ignore_errors: true
 
-- name: Restart Nginx
-  raw: systemctl restart nginx
+- name: Test Nginx configuration
+  raw: nginx -t
+  ignore_errors: true
+
+- name: Ensure Nginx is started and enabled
+  raw: systemctl enable nginx && systemctl restart nginx
+  ignore_errors: true
+
+- name: Test local health endpoint
+  raw: curl -s http://localhost:8000/health
+  register: health_result
+  ignore_errors: true
+
+- name: Display health check result
+  raw: 'echo "Health check result: {{ health_result.stdout }}"'
+  ignore_errors: true
+
+- name: Test local metrics endpoint
+  raw: curl -s http://localhost:8000/metrics | head -n 10
+  register: metrics_result
+  ignore_errors: true
+
+- name: Display metrics
+  raw: 'echo "Metrics (first 10 lines): {{ metrics_result.stdout }}"'
+  ignore_errors: true
+
+- name: Check port 80 connectivity
+  raw: curl -s http://localhost:80
+  register: port80_result
+  ignore_errors: true
+
+- name: Display port 80 result
+  raw: 'echo "Port 80 result: {{ port80_result.stdout }}"'
   ignore_errors: true

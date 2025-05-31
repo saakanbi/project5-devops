@@ -1,12 +1,16 @@
-[Unit]
-Description=Flask Application
-After=network.target
+server {
+    listen 80;
+    server_name _;
 
-[Service]
-User={{ app_user }}
-WorkingDirectory={{ app_dir }}
-ExecStart=/usr/bin/python3 app.py
-Restart=always
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
 
-[Install]
-WantedBy=multi-user.target
+    location /metrics {
+        proxy_pass http://127.0.0.1:8000/metrics;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
