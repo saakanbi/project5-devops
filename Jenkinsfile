@@ -87,6 +87,15 @@ EOF'
                             fi
                             
                             sudo systemctl restart flask-app
+                            
+                            # Verify service is running
+                            sleep 5
+                            if sudo systemctl is-active --quiet flask-app; then
+                                echo 'Flask application deployed successfully!'
+                            else
+                                echo 'Failed to start Flask application!'
+                                exit 1
+                            fi
                         "
                     '''
                 }
@@ -139,6 +148,15 @@ EOF'
                             fi
                             
                             sudo systemctl restart prometheus
+                            
+                            # Verify Prometheus is running
+                            sleep 5
+                            if sudo systemctl is-active --quiet prometheus; then
+                                echo 'Prometheus started successfully!'
+                            else
+                                echo 'Failed to start Prometheus!'
+                                exit 1
+                            fi
                         "
                     '''
                 }
