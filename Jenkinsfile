@@ -55,31 +55,8 @@ pipeline {
                         # Copy files to Flask server
                         scp -o StrictHostKeyChecking=no -r "${WORKSPACE}/deploy/"* ec2-user@${FLASK_SERVER}:/tmp/flask-app/
                         
-                        # SSH to server and deploy
-                        ssh -o StrictHostKeyChecking=no ec2-user@${FLASK_SERVER} "
-                            sudo mkdir -p /opt/flask_dashboard
-                            sudo cp -r /tmp/flask-app/* /opt/flask_dashboard/
-                            cd /opt/flask_dashboard
-                            sudo pip3 install -r requirements.txt
-                            
-                            # Create systemd service for Gunicorn
-                            sudo bash -c 'cat > /etc/systemd/system/flaskapp.service << EOF
-[Unit]
-Description=Gunicorn Flask Dashboard
-After=network.target
-
-[Service]
-User=ec2-user
-WorkingDirectory=/opt/flask_dashboard
-ExecStart=/usr/local/bin/gunicorn --workers 3 --bind 127.0.0.1:8000 app:app
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF'
-                            
-                            # Configure Nginx
-                            sudo bash -c 'cat > /etc/nginx/nginx.conf << EOF
+                        # Create Nginx config file
+                        cat > nginx.conf << 'EOF'
 user nginx;
 worker_processes auto;
 error_log /var/log/nginx/error.log;
@@ -92,9 +69,9 @@ events {
 }
 
 http {
-    log_format  main  \\'$remote_addr - $remote_user [$time_local] "$request" \\'
-                      \\'$status $body_bytes_sent "$http_referer" \\'
-                      \\'"$http_user_agent" "$http_x_forwarded_for"\\';
+    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
 
     access_log  /var/log/nginx/access.log  main;
 
@@ -133,7 +110,36 @@ http {
         }
     }
 }
+EOF
+                        
+                        # Copy Nginx config to server
+                        scp -o StrictHostKeyChecking=no nginx.conf ec2-user@${FLASK_SERVER}:/tmp/nginx.conf
+                        
+                        # SSH to server and deploy
+                        ssh -o StrictHostKeyChecking=no ec2-user@${FLASK_SERVER} "
+                            sudo mkdir -p /opt/flask_dashboard
+                            sudo cp -r /tmp/flask-app/* /opt/flask_dashboard/
+                            cd /opt/flask_dashboard
+                            sudo pip3 install -r requirements.txt
+                            
+                            # Create systemd service for Gunicorn
+                            sudo bash -c 'cat > /etc/systemd/system/flaskapp.service << EOF
+[Unit]
+Description=Gunicorn Flask Dashboard
+After=network.target
+
+[Service]
+User=ec2-user
+WorkingDirectory=/opt/flask_dashboard
+ExecStart=/usr/local/bin/gunicorn --workers 3 --bind 127.0.0.1:8000 app:app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
 EOF'
+                            
+                            # Configure Nginx
+                            sudo cp /tmp/nginx.conf /etc/nginx/nginx.conf
                             
                             # Remove default Nginx config
                             sudo rm -f /etc/nginx/conf.d/default.conf || true
@@ -185,4 +191,3 @@ EOF'
         }
     }
 }
-// This Jenkinsfile defines a CI/CD pipeline for deploying a Flask application with SonarQube analysis, packaging, and deployment to an EC2 instance.
