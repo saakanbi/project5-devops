@@ -51,7 +51,7 @@ pipeline {
         
         stage('Deploy Application') {
             steps {
-                sshagent(['ansible-key']) {
+                sshagent(['ec2-ssh-key']) {
                     sh '''
                         # Create remote directory
                         ssh -o StrictHostKeyChecking=no ec2-user@${FLASK_SERVER} "mkdir -p /tmp/flask-app"
@@ -104,7 +104,7 @@ EOF'
         
         stage('Setup Monitoring') {
             steps {
-                sshagent(['ansible-key']) {
+                sshagent(['ec2-ssh-key']) {
                     sh '''
                         ssh -o StrictHostKeyChecking=no ec2-user@${FLASK_SERVER} "
                             # Install Prometheus if not installed
