@@ -33,14 +33,21 @@ pipeline {
         
         stage('Package Application') {
             steps {
-                dir('app') {
-                    sh '''
-                        find . -name "*.pyc" -delete || true
-                        tar --exclude="*.git*" --exclude="*.pyc" -czf flask-app-${APP_VERSION}.tar.gz .
-                        mkdir -p "${WORKSPACE}/ansible/files"
-                        cp "flask-app-${APP_VERSION}.tar.gz" "${WORKSPACE}/ansible/files/"
-                    '''
-                }
+                sh '''
+                    # Create a clean copy of the app directory
+                    rm -rf /tmp/flask-app-tmp || true
+                    mkdir -p /tmp/flask-app-tmp
+                    cp -r app/* /tmp/flask-app-tmp/
+                    
+                    # Create archive from the clean copy
+                    cd /tmp/flask-app-tmp
+                    find . -name "*.pyc" -delete || true
+                    tar -czf flask-app-${APP_VERSION}.tar.gz .
+                    
+                    # Copy to ansible files directory
+                    mkdir -p "${WORKSPACE}/ansible/files"
+                    cp flask-app-${APP_VERSION}.tar.gz "${WORKSPACE}/ansible/files/"
+                '''
             }
         }
         
