@@ -46,42 +46,23 @@ pipeline {
             }
         }
         
-        stage('Install Ansible') {
+        stage('Deploy Application') {
             steps {
-                sh '''
-                    # Check if ansible is installed
-                    if ! command -v ansible &> /dev/null; then
-                        echo "Installing Ansible..."
-                        pip install ansible
-                    fi
-                    
-                    # Verify installation
-                    ansible --version
-                '''
-            }
-        }
-        
-        stage('Deploy with Ansible') {
-            steps {
-                sh '''
-                    cd "${WORKSPACE}"
-                    echo "Current directory: $(pwd)"
-                    echo "Ansible inventory: ${ANSIBLE_INVENTORY}"
-                    echo "Checking if inventory exists: $(ls -la ${ANSIBLE_INVENTORY} 2>/dev/null || echo 'NOT FOUND')"
-                    echo "Checking if playbook exists: $(ls -la ansible/deploy_flask.yml 2>/dev/null || echo 'NOT FOUND')"
-                    
-                    # Run ansible-playbook with verbose output
-                    ansible-playbook -i ${ANSIBLE_INVENTORY} ansible/deploy_flask.yml -e app_version=${APP_VERSION} -e app_files_dir="${WORKSPACE}/ansible/files" -vvv
-                '''
-            }
-        }
-        
-        stage('Setup Monitoring') {
-            steps {
-                sh '''
-                    cd "${WORKSPACE}"
-                    ansible-playbook -i ${ANSIBLE_INVENTORY} ansible/site.yml --tags monitoring -vvv
-                '''
+                sshagent(['ansible-key']) {
+                    sh '''
+                        # Copy files to Flask server
+                        scp -r "${WORKSPACE}/ansible/files/"* ec2-user@3.222.89.93:/tmp/flask-app/
+                        
+                        # SSH to server and deploy
+                        ssh ec2-user@3.222.89.93 "
+                            sudo mkdir -p /opt/flask-app
+                            sudo cp -r /tmp/flask-app/* /opt/flask-app/
+                            cd /opt/flask-app
+                            sudo pip3 install -r requirements.txt
+                            sudo systemctl restart flask-app || sudo systemctl start flask-app
+                        "
+                    '''
+                }
             }
         }
     }
