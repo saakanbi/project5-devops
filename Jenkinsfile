@@ -4,6 +4,7 @@ pipeline {
     environment {
         APP_VERSION = "${env.BUILD_NUMBER}"
         ANSIBLE_INVENTORY = "${WORKSPACE}/ansible/inventory"
+        ANSIBLE_HOST_KEY_CHECKING = 'False'
     }
     
     stages {
