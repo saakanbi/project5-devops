@@ -37,11 +37,26 @@ pipeline {
                     # Create deploy directory
                     mkdir -p "${WORKSPACE}/deploy"
                     
-                    # Copy application files
-                    cp -r app/* "${WORKSPACE}/deploy/"
+                    # Create a simplified prometheus_metrics.py
+                    cat > "${WORKSPACE}/deploy/prometheus_metrics.py" << 'EOF'
+from prometheus_client import Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST
+import time
+
+# Application metrics
+REQUEST_COUNT = Counter('app_requests_total', 'Total app requests')
+DASHBOARD_VIEWS = Counter('app_dashboard_views_total', 'Dashboard page views')
+
+# Flask HTTP request metrics
+HTTP_REQUEST_TOTAL = Counter('flask_http_request_total', 'Total HTTP requests', 
+                            ['method', 'endpoint', 'status'])
+
+def get_metrics():
+    """Generate latest metrics"""
+    return generate_latest()
+EOF
                     
-                    # Fix prometheus_metrics.py
-                    sed -i 's/GC_COLLECTOR.register()/# GC_COLLECTOR already registered automatically/' "${WORKSPACE}/deploy/prometheus_metrics.py"
+                    # Copy other application files
+                    cp app/app.py app/Dockerfile app/requirements.txt "${WORKSPACE}/deploy/"
                     
                     # Create version file
                     echo "${APP_VERSION}" > "${WORKSPACE}/deploy/VERSION"
@@ -112,67 +127,6 @@ EOF'
                 }
             }
         }
-        
-        stage('Setup Monitoring') {
-            steps {
-                sshagent(['ec2-ssh-key']) {
-                    sh '''
-                        ssh -o StrictHostKeyChecking=no ec2-user@${FLASK_SERVER} "
-                            # Install Prometheus if not installed
-                            if ! command -v prometheus &> /dev/null; then
-                                sudo yum install -y wget
-                                wget https://github.com/prometheus/prometheus/releases/download/v2.37.0/prometheus-2.37.0.linux-amd64.tar.gz
-                                tar xvfz prometheus-*.tar.gz
-                                sudo cp prometheus-*/prometheus /usr/local/bin/
-                                sudo mkdir -p /etc/prometheus
-                            fi
-                            
-                            # Create Prometheus config
-                            sudo bash -c 'cat > /etc/prometheus/prometheus.yml << EOF
-global:
-  scrape_interval: 15s
-
-scrape_configs:
-  - job_name: \"flask-app\"
-    static_configs:
-      - targets: [\"localhost:8000\"]
-    metrics_path: \"/metrics\"
-EOF'
-                            
-                            # Create Prometheus service if it doesn't exist
-                            if [ ! -f /etc/systemd/system/prometheus.service ]; then
-                                sudo bash -c 'cat > /etc/systemd/system/prometheus.service << EOF
-[Unit]
-Description=Prometheus
-After=network.target
-
-[Service]
-User=root
-ExecStart=/usr/local/bin/prometheus --config.file=/etc/prometheus/prometheus.yml
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF'
-                                sudo systemctl daemon-reload
-                                sudo systemctl enable prometheus
-                            fi
-                            
-                            sudo systemctl restart prometheus
-                            
-                            # Verify Prometheus is running
-                            sleep 5
-                            if sudo systemctl is-active --quiet prometheus; then
-                                echo 'Prometheus started successfully!'
-                            else
-                                echo 'Failed to start Prometheus!'
-                                exit 1
-                            fi
-                        "
-                    '''
-                }
-            }
-        }
     }
     
     post {
@@ -187,3 +141,8 @@ EOF'
         }
     }
 }
+// This Jenkinsfile defines a CI/CD pipeline for a Flask application with SonarQube analysis, packaging, and deployment to an EC2 instance.
+// It includes stages for checking out the code, running SonarQube analysis, packaging the application, and deploying it to a remote server.
+// The pipeline uses environment variables for configuration and includes error handling to ensure the application is deployed correctly.
+// The deployment stage uses SSH to copy files to the remote server, sets up a systemd service for the Flask application, and verifies that the service is running correctly.
+// The pipeline also cleans up the workspace after completion.
