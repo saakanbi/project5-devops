@@ -51,11 +51,54 @@ pipeline {
                     sh '''
                         # Copy app.py to the Flask server
                         scp -o StrictHostKeyChecking=no app.py ec2-user@${FLASK_SERVER}:/tmp/app.py
+                        
+                        # Create Nginx config file
+                        cat > nginx.conf << 'EOF'
+server {
+    listen 80;
+    server_name _;
+
+    location / {
+        proxy_pass http://0.0.0.0:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    location /metrics {
+        proxy_pass http://0.0.0.0:8000/metrics;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+EOF
+                        # Copy Nginx config to server
+                        scp -o StrictHostKeyChecking=no nginx.conf ec2-user@${FLASK_SERVER}:/tmp/nginx.conf
+                        
                         # SSH to the server and deploy the app
                         ssh -o StrictHostKeyChecking=no ec2-user@${FLASK_SERVER} "
+                            # Update app.py
                             sudo cp /tmp/app.py /opt/flask_dashboard/app.py
+                            
+                            # Update Nginx config
+                            sudo cp /tmp/nginx.conf /etc/nginx/conf.d/flask-app.conf
+                            sudo rm -f /etc/nginx/conf.d/default.conf || true
+                            sudo nginx -t
+                            
+                            # Restart services
                             sudo systemctl restart flaskapp
+                            sleep 3
+                            sudo systemctl restart nginx
+                            
+                            # Check service status
+                            echo 'Flask service status:'
                             sudo systemctl status flaskapp
+                            echo 'Nginx service status:'
+                            sudo systemctl status nginx
+                            
+                            # Check if Gunicorn is listening
+                            echo 'Checking if Gunicorn is listening:'
+                            sudo netstat -tulpn | grep 8000
                         "
                     '''
                 }
